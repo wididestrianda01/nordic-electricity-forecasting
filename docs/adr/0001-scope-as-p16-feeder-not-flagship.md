@@ -1,0 +1,3 @@
+# Scope P14 as a P16 feeder, not a flagship deliverable
+
+`context/P14_EnergyForecasting_Reference.md` sketches a 60-80 hour flagship forecasting project. The Portfolio Master Index instead sizes P14 at ~25-30 hours as the forecast-input layer for P16 (BESS Revenue Optimizer). We chose the Master Index framing: P14's job is to produce forecasts and regime diagnostics good enough to drive P16's revenue optimization, not to be the most polished standalone notebook in the portfolio. The trade-off is depth for breadth — fewer models, less exhaustive backtesting, in exchange for shipping on time and leaving room for P16.

@@ -1,0 +1,3 @@
+# Model regimes explicitly rather than one global model
+
+The Nov 2024 flow-based coupling switch and the Oct 2025 MTU switch are structural breaks in price formation, not noise. We chose explicit regime handling (e.g. HMM-based regime detection/labeling feeding into regime-conditional forecasts) over training one global model across both breaks and hoping it generalizes. This is the project's headline result for the Ingrid/BESS audience — a global model would be simpler to build but would silently blend pre- and post-break dynamics, understating error around each transition and around any future bidding-zone reconfiguration.

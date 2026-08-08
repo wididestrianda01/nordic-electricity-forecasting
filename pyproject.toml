@@ -5,6 +5,8 @@ requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
+    "hmmlearn>=0.3",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]

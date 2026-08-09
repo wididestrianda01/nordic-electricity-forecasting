@@ -37,8 +37,14 @@ def _build_training_features(
     regime_labels: pd.Series,
     mtu_minutes: int,
 ) -> pd.DataFrame:
-    """Build lag and regime features for training."""
-    df = historical_data[["price"]].copy()
+    """Build lag, load/wind, and regime features for training."""
+    cols_to_copy = ["price"]
+    if "load_forecast" in historical_data.columns:
+        cols_to_copy.append("load_forecast")
+    if "wind_forecast" in historical_data.columns:
+        cols_to_copy.append("wind_forecast")
+
+    df = historical_data[cols_to_copy].copy()
     df["regime"] = regime_labels
     df["slot"] = _slot_of_day(df.index, mtu_minutes)
 
@@ -47,12 +53,17 @@ def _build_training_features(
         lag_col = f"lag_{lag_days}d"
         df[lag_col] = df["price"].shift(lag_days * 24 * 60 // mtu_minutes)
 
-        # Mask lags that cross regime boundaries (ticket 05, ADR-0007)
+        # Mask lags (and load/wind) that cross regime boundaries (ticket 05, ADR-0007; ticket 02)
         # to prevent training on inconsistent price regimes.
         for idx in df.index:
             lag_date = (idx - pd.Timedelta(days=lag_days)).date()
             if crosses_boundary(idx.date(), lag_date):
                 df.loc[idx, lag_col] = np.nan
+                # Also mask load/wind for this row (ticket 02)
+                if "load_forecast" in df.columns:
+                    df.loc[idx, "load_forecast"] = np.nan
+                if "wind_forecast" in df.columns:
+                    df.loc[idx, "wind_forecast"] = np.nan
 
     # Drop rows with NaN lags (first 7 days + boundary-masked rows)
     df = df.dropna(subset=[f"lag_{lag_days}d" for lag_days in LAG_DAYS])
@@ -80,11 +91,17 @@ def _build_forecast_features(
     # For each forecast row, look back to find lag values
     forecast_rows = []
     mean_val = historical_data["price"].mean()
+    has_load = "load_forecast" in historical_data.columns
+    has_wind = "wind_forecast" in historical_data.columns
+    load_mean = historical_data["load_forecast"].mean() if has_load else None
+    wind_mean = historical_data["wind_forecast"].mean() if has_wind else None
+
     for forecast_ts in forecast_index:
         slot = _slot_of_day(pd.DatetimeIndex([forecast_ts]), mtu_minutes)[0]
         row = {"slot": slot, "regime": forecast_regime}
 
         all_lags_masked = True
+        any_lag_crosses = False  # ponytail: separate flag for load/wind masking (ticket 02)
         # Collect lags from historical data
         for lag_days in LAG_DAYS:
             lag_ts = forecast_ts - pd.Timedelta(days=lag_days)
@@ -94,6 +111,7 @@ def _build_forecast_features(
             # instead of looking them up in historical data.
             if crosses_boundary(as_of_date, lag_date):
                 row[f"lag_{lag_days}d"] = np.nan
+                any_lag_crosses = True  # Track if ANY lag crosses (for load/wind masking)
             else:
                 all_lags_masked = False
                 lag_val = historical_data[historical_data.index == lag_ts]["price"].values
@@ -101,6 +119,28 @@ def _build_forecast_features(
                     row[f"lag_{lag_days}d"] = lag_val[0]
                 else:
                     row[f"lag_{lag_days}d"] = np.nan
+
+        # Add load/wind for this forecast timestamp (ticket 02)
+        # Mask them if ANY lags cross a boundary, per ticket 02 requirements (matching _build_training_features)
+        if has_load:
+            if any_lag_crosses:
+                row["load_forecast"] = np.nan
+            else:
+                load_val = historical_data[historical_data.index == forecast_ts]["load_forecast"].values
+                if len(load_val) > 0:
+                    row["load_forecast"] = load_val[0]
+                else:
+                    row["load_forecast"] = np.nan
+
+        if has_wind:
+            if any_lag_crosses:
+                row["wind_forecast"] = np.nan
+            else:
+                wind_val = historical_data[historical_data.index == forecast_ts]["wind_forecast"].values
+                if len(wind_val) > 0:
+                    row["wind_forecast"] = wind_val[0]
+                else:
+                    row["wind_forecast"] = np.nan
 
         # Warn if all lags are boundary-masked for this forecast row
         if all_lags_masked:
@@ -118,6 +158,12 @@ def _build_forecast_features(
     # Fill any missing lags with the overall mean from training
     for lag_col in [f"lag_{lag_days}d" for lag_days in LAG_DAYS]:
         df[lag_col] = df[lag_col].fillna(mean_val)
+
+    # Fill any missing load/wind with their means
+    if has_load:
+        df["load_forecast"] = df["load_forecast"].fillna(load_mean)
+    if has_wind:
+        df["wind_forecast"] = df["wind_forecast"].fillna(wind_mean)
 
     return df
 
@@ -142,7 +188,15 @@ def lgbm_quantile_forecast(
 
     # Build training features
     train_df = _build_training_features(historical_data, regime_labels, mtu_minutes)
-    feature_cols = [f"lag_{d}d" for d in LAG_DAYS] + ["slot", "regime"]
+
+    # Build feature columns list (lags + optional load/wind + slot + regime, ticket 02)
+    feature_cols = [f"lag_{d}d" for d in LAG_DAYS]
+    if "load_forecast" in train_df.columns:
+        feature_cols.append("load_forecast")
+    if "wind_forecast" in train_df.columns:
+        feature_cols.append("wind_forecast")
+    feature_cols.extend(["slot", "regime"])
+
     X_train = train_df[feature_cols]
     y_train = train_df["price"]
 

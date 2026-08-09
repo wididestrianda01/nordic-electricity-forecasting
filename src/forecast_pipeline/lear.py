@@ -45,11 +45,27 @@ def lear_forecast(
 
     day = historical_data.index.normalize()
     slot = _slot_of_day(historical_data.index, mtu_minutes)
-    pivot = (
+
+    # Build pivot for price and optional load/wind features (ticket 02)
+    price_pivot = (
         historical_data.assign(day=day, slot=slot)
         .pivot(index="day", columns="slot", values="price")
         .sort_index()
     )
+    load_pivot = None
+    wind_pivot = None
+    if "load_forecast" in historical_data.columns:
+        load_pivot = (
+            historical_data[["load_forecast"]].assign(day=day, slot=slot)
+            .pivot(index="day", columns="slot", values="load_forecast")
+            .sort_index()
+        )
+    if "wind_forecast" in historical_data.columns:
+        wind_pivot = (
+            historical_data[["wind_forecast"]].assign(day=day, slot=slot)
+            .pivot(index="day", columns="slot", values="wind_forecast")
+            .sort_index()
+        )
 
     periods_per_day = 24 * 60 // mtu_minutes
     forecast_index = pd.date_range(
@@ -61,24 +77,37 @@ def lear_forecast(
     predictions = []
     for slot_id in range(periods_per_day):
         try:
-            series = pivot[slot_id]
+            price_series = price_pivot[slot_id]
         except KeyError:
             raise ValueError(
                 f"No training data for slot {slot_id} (missing from historical data). "
                 f"Historical data must have coverage for all {periods_per_day} MTU slots."
             ) from None
 
-        features = pd.concat({lag: series.shift(lag) for lag in lag_days}, axis=1)
+        # Build lag features for price (using string column names for consistency with load/wind)
+        lag_col_dict = {f"lag_{lag}d": price_series.shift(lag) for lag in lag_days}
+        features = pd.concat(lag_col_dict, axis=1)
 
-        # Mask lags that cross regime boundaries (ticket 05, ADR-0007)
-        # so training data doesn't blend inconsistent price regimes.
+        # Add load/wind columns if present (ticket 02)
+        if load_pivot is not None:
+            features["load_forecast"] = load_pivot[slot_id]
+        if wind_pivot is not None:
+            features["wind_forecast"] = wind_pivot[slot_id]
+
+        # Mask lags and load/wind that cross regime boundaries (ticket 05, ADR-0007; ticket 02)
         for day in features.index:
             for lag in lag_days:
+                lag_col = f"lag_{lag}d"
                 lag_day = day - pd.Timedelta(days=lag)
                 if crosses_boundary(day.date(), lag_day.date()):
-                    features.loc[day, lag] = pd.NA
+                    features.loc[day, lag_col] = pd.NA
+                    # Also mask load/wind for this row (ticket 02)
+                    if load_pivot is not None:
+                        features.loc[day, "load_forecast"] = pd.NA
+                    if wind_pivot is not None:
+                        features.loc[day, "wind_forecast"] = pd.NA
 
-        target = series
+        target = price_series
         train = features.assign(target=target).dropna()
 
         if len(train) == 0:
@@ -87,33 +116,71 @@ def lear_forecast(
                 f"Check historical data has no NaNs and sufficient coverage for all slots."
             )
 
+        # Collect all feature columns for training
+        feature_cols = [f"lag_{lag}d" for lag in lag_days]
+        if load_pivot is not None:
+            feature_cols.append("load_forecast")
+        if wind_pivot is not None:
+            feature_cols.append("wind_forecast")
+
         # ponytail: alpha=1.0 is LEAR paper baseline regularization (Lago et al., ADR-0005)
         model = Lasso(alpha=1.0)
-        model.fit(train[list(lag_days)], train["target"])
+        model.fit(train[feature_cols], train["target"])
 
         query_day = pd.Timestamp(as_of_date, tz="UTC")
-        query_dict: dict[int, float] = {}
-        all_lags_masked = True
+        query_dict: dict = {}
+        all_features_masked = True
+
+        # Determine if any lags cross boundary
+        any_lag_crosses = False
         for lag in lag_days:
             lag_date = query_day - pd.Timedelta(days=lag)
             lag_day = lag_date.date()
-
-            # For boundary-crossing lags, use mean fallback (ticket 05, ADR-0007)
-            # instead of raising an error. This mirrors lgbm.py's behavior.
             if crosses_boundary(as_of_date, lag_day):
-                query_dict[lag] = series.mean()
+                any_lag_crosses = True
+                break
+
+        # Build query values for lags
+        for lag in lag_days:
+            lag_col = f"lag_{lag}d"
+            lag_date = query_day - pd.Timedelta(days=lag)
+            lag_day = lag_date.date()
+
+            if crosses_boundary(as_of_date, lag_day):
+                query_dict[lag_col] = price_series.mean()
             else:
-                all_lags_masked = False
+                all_features_masked = False
                 try:
-                    query_dict[lag] = pivot[slot_id].loc[lag_date]
+                    query_dict[lag_col] = price_pivot[slot_id].loc[lag_date]
                 except KeyError:
                     raise ValueError(
                         f"Missing lag date {lag_date.date()} for slot {slot_id} in pivot. "
                         f"Historical data must span at least {max(lag_days)} days before forecast date."
                     ) from None
 
-        # Warn if all lags are boundary-masked
-        if all_lags_masked:
+        # Build query values for load/wind (masked if lags are masked, ticket 02)
+        # Note: load/wind for the forecast date may not be in historical_data
+        # In practice, these would come from operational forecasts; here we use mean as fallback
+        query_date = pd.Timestamp(as_of_date, tz="UTC").normalize()
+        if load_pivot is not None:
+            if any_lag_crosses:
+                query_dict["load_forecast"] = load_pivot[slot_id].mean()
+            else:
+                try:
+                    query_dict["load_forecast"] = load_pivot[slot_id].loc[query_date]
+                except KeyError:
+                    query_dict["load_forecast"] = load_pivot[slot_id].mean()
+        if wind_pivot is not None:
+            if any_lag_crosses:
+                query_dict["wind_forecast"] = wind_pivot[slot_id].mean()
+            else:
+                try:
+                    query_dict["wind_forecast"] = wind_pivot[slot_id].loc[query_date]
+                except KeyError:
+                    query_dict["wind_forecast"] = wind_pivot[slot_id].mean()
+
+        # Warn if all features are boundary-masked
+        if all_features_masked:
             warnings.warn(
                 f"forecast for {as_of_date} has all lags boundary-masked; "
                 "degraded to mean fallback with no discriminative signal",
@@ -122,6 +189,6 @@ def lear_forecast(
             )
 
         query = pd.Series(query_dict)
-        predictions.append(model.predict(query.to_frame().T[list(lag_days)])[0])
+        predictions.append(model.predict(query.to_frame().T[feature_cols])[0])
 
     return pd.Series(predictions, index=forecast_index, name="lear_forecast")

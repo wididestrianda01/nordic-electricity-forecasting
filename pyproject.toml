@@ -7,6 +7,7 @@ dependencies = [
     "numpy>=1.26",
     "hmmlearn>=0.3",
     "scikit-learn>=1.4",
+    "lightgbm>=4.3",
 ]
 
 [project.optional-dependencies]

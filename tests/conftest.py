@@ -63,3 +63,22 @@ def malformed_input_scenario() -> tuple[date, pd.DataFrame]:
     """historical_data too short to forecast from."""
     as_of = date(2024, 6, 15)
     return as_of, _hourly_history(as_of, days=1)
+
+
+@pytest.fixture
+def regime_shift_to_high_scenario() -> tuple[date, pd.DataFrame]:
+    """30 days hourly data with regime shift, forecast date after transition to high regime.
+
+    Used to verify that regime-conditional model produces higher forecasts for high regime.
+    History: low regime (20±3) for first 15 days, then high regime (80±15) for last 15 days.
+    Forecast: made at end of high regime, should predict high prices.
+    """
+    as_of = date(2024, 6, 30)  # End of the 30-day period
+    start = pd.Timestamp(as_of) - pd.Timedelta(days=30)
+    index = pd.date_range(start, periods=30 * 24, freq="h", tz="UTC")
+    rng = np.random.default_rng(seed=8)
+    half = len(index) // 2
+    low_regime = rng.normal(loc=20.0, scale=3.0, size=half)
+    high_regime = rng.normal(loc=80.0, scale=15.0, size=len(index) - half)
+    prices = np.concatenate([low_regime, high_regime])
+    return as_of, pd.DataFrame({"price": prices}, index=index)

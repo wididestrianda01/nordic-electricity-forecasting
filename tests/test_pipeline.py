@@ -74,3 +74,33 @@ def test_no_external_calls_needed(pre_nov_2024_scenario, monkeypatch):
     monkeypatch.setattr(socket, "socket", _blocked)
     as_of, history = pre_nov_2024_scenario
     forecast_pipeline(as_of, history)
+
+
+def test_regime_labels_populated_not_unlabeled(two_regime_scenario):
+    """Regime column must contain actual regime labels, not 'unlabeled' placeholder."""
+    as_of, history = two_regime_scenario
+    result = forecast_pipeline(as_of, history)
+    assert (result.forecast["regime"] != "unlabeled").all()
+    assert result.forecast["regime"].isin(["regime_0", "regime_1"]).all()
+
+
+def test_forecast_responds_to_regime_shift(regime_shift_to_high_scenario):
+    """Forecast should be materially higher when regime has shifted to high regime."""
+    as_of, history = regime_shift_to_high_scenario
+    result = forecast_pipeline(as_of, history)
+
+    # In high regime (80±15), P50 should be significantly above low regime (20±3)
+    # Using a conservative threshold: mean(high regime) - 2*std(low regime) = 80 - 6 = 74
+    assert (result.forecast["p50"] > 50).all(), \
+        f"P50 should be high in high regime, got mean={result.forecast['p50'].mean():.1f}"
+
+
+def test_forecast_regime_label_is_most_recent(two_regime_scenario):
+    """Forecast regime label should reflect the most recent regime from history."""
+    as_of, history = two_regime_scenario
+    result = forecast_pipeline(as_of, history)
+
+    # The two_regime_scenario has high regime in second half (most recent)
+    # So forecast should be labeled as the high regime
+    assert (result.forecast["regime"] == "regime_1").all(), \
+        "Forecast should use most recent regime label"

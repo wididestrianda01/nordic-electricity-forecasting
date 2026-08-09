@@ -1,16 +1,16 @@
 """Ticket 01: pipeline skeleton and P14->P16 output contract.
 
-Quantile and regime values here are placeholders (empirical quantiles,
-constant regime label) -- ticket 02 (HMM regime detection), 03 (LEAR
-baseline), and 04 (regime-conditional LightGBM) replace this logic without
-changing the contract this module defines.
+Ticket 04 (regime-conditional LightGBM) replaces the placeholder quantile logic
+with real quantile regression, conditioned on the HMM regime label from ticket 02.
+Ticket 03 (LEAR baseline) is available as an alternative via lear_forecast.
 """
 
 from dataclasses import dataclass
 from datetime import date
 
-import numpy as np
 import pandas as pd
+
+from forecast_pipeline.lgbm import lgbm_quantile_forecast
 
 # MTU switched from hourly to 15-minute on this date (see ADR-0003).
 MTU_15MIN_SWITCH_DATE = date(2025, 10, 1)
@@ -54,22 +54,7 @@ def forecast_pipeline(as_of_date: date, historical_data: pd.DataFrame) -> Foreca
     mtu_minutes = _mtu_minutes_for(as_of_date)
     _validate(historical_data, mtu_minutes)
 
-    p10, p50, p90 = np.percentile(historical_data["price"], [10, 50, 90])
-
-    periods_per_day = 24 * 60 // mtu_minutes
-    index = pd.date_range(
-        pd.Timestamp(as_of_date, tz="UTC"),
-        periods=periods_per_day,
-        freq=f"{mtu_minutes}min",
-    )
-    forecast = pd.DataFrame(
-        {
-            "p10": p10,
-            "p50": p50,
-            "p90": p90,
-            "regime": "unlabeled",
-        },
-        index=index,
-    )
+    # Use regime-conditional LightGBM quantile regression (ticket 04)
+    forecast = lgbm_quantile_forecast(as_of_date, historical_data, mtu_minutes)
 
     return ForecastOutput(as_of_date=as_of_date, mtu_minutes=mtu_minutes, forecast=forecast)

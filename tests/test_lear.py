@@ -112,3 +112,40 @@ def test_empty_training_data_raises_clear_error():
     as_of_2 = date(2024, 7, 1)
     with pytest.raises(ValueError, match=r"(?i)(no training data|missing lag)"):
         lear_forecast(as_of_2, history)
+
+
+def test_boundary_all_lags_masked_warns_lear():
+    """Test that lear_forecast warns when all lags are boundary-masked."""
+    from unittest import mock
+    from forecast_pipeline import regime_boundaries
+
+    rng = np.random.default_rng(seed=44)
+
+    # Create history spanning across Oct 1, 2025 boundary
+    # Use 15-minute frequency to match post_oct_2025_scenario
+    prices = rng.normal(loc=40.0, scale=10.0, size=45 * 96)  # 45 days of 15-min
+    index = pd.date_range(
+        pd.Timestamp(date(2025, 8, 17), tz="UTC"),
+        periods=len(prices),
+        freq="15min"
+    )
+    history = pd.DataFrame({"price": prices}, index=index)
+
+    # Forecast on a date after the Oct 1, 2025 boundary
+    as_of = date(2025, 10, 2)
+
+    original_crosses = regime_boundaries.crosses_boundary
+
+    def mock_crosses_boundary(as_of_date, lag_day):
+        # During training (feature masking in loop over features.index):
+        # return False (normal behavior, don't mask training data)
+        # During forecast query: return True (all lags masked in forecast)
+        if as_of_date == as_of:  # forecast query phase
+            return True
+        else:  # training phase
+            return original_crosses(as_of_date, lag_day)
+
+    with mock.patch("forecast_pipeline.lear.crosses_boundary", side_effect=mock_crosses_boundary):
+        with pytest.warns(UserWarning, match=r"all lags boundary-masked"):
+            forecast = lear_forecast(as_of, history)
+            assert len(forecast) == 96  # 96 15-min slots

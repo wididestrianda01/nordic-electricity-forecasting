@@ -8,6 +8,7 @@ grid.
 """
 
 from datetime import date
+import warnings
 
 import pandas as pd
 from sklearn.linear_model import Lasso
@@ -92,6 +93,7 @@ def lear_forecast(
 
         query_day = pd.Timestamp(as_of_date, tz="UTC")
         query_dict: dict[int, float] = {}
+        all_lags_masked = True
         for lag in lag_days:
             lag_date = query_day - pd.Timedelta(days=lag)
             lag_day = lag_date.date()
@@ -101,6 +103,7 @@ def lear_forecast(
             if crosses_boundary(as_of_date, lag_day):
                 query_dict[lag] = series.mean()
             else:
+                all_lags_masked = False
                 try:
                     query_dict[lag] = pivot[slot_id].loc[lag_date]
                 except KeyError:
@@ -108,6 +111,16 @@ def lear_forecast(
                         f"Missing lag date {lag_date.date()} for slot {slot_id} in pivot. "
                         f"Historical data must span at least {max(lag_days)} days before forecast date."
                     ) from None
+
+        # Warn if all lags are boundary-masked
+        if all_lags_masked:
+            warnings.warn(
+                f"forecast for {as_of_date} has all lags boundary-masked; "
+                "degraded to mean fallback with no discriminative signal",
+                UserWarning,
+                stacklevel=3,
+            )
+
         query = pd.Series(query_dict)
         predictions.append(model.predict(query.to_frame().T[list(lag_days)])[0])
 

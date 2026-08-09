@@ -14,6 +14,7 @@ Quantile ordering (P10 <= P50 <= P90) is preserved post-hoc if needed.
 """
 
 from datetime import date
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -78,10 +79,12 @@ def _build_forecast_features(
 
     # For each forecast row, look back to find lag values
     forecast_rows = []
+    mean_val = historical_data["price"].mean()
     for forecast_ts in forecast_index:
         slot = _slot_of_day(pd.DatetimeIndex([forecast_ts]), mtu_minutes)[0]
         row = {"slot": slot, "regime": forecast_regime}
 
+        all_lags_masked = True
         # Collect lags from historical data
         for lag_days in LAG_DAYS:
             lag_ts = forecast_ts - pd.Timedelta(days=lag_days)
@@ -92,11 +95,21 @@ def _build_forecast_features(
             if crosses_boundary(as_of_date, lag_date):
                 row[f"lag_{lag_days}d"] = np.nan
             else:
+                all_lags_masked = False
                 lag_val = historical_data[historical_data.index == lag_ts]["price"].values
                 if len(lag_val) > 0:
                     row[f"lag_{lag_days}d"] = lag_val[0]
                 else:
                     row[f"lag_{lag_days}d"] = np.nan
+
+        # Warn if all lags are boundary-masked for this forecast row
+        if all_lags_masked:
+            warnings.warn(
+                f"forecast for {as_of_date} has all lags boundary-masked; "
+                "degraded to mean fallback with no discriminative signal",
+                UserWarning,
+                stacklevel=3,
+            )
 
         forecast_rows.append(row)
 
@@ -104,9 +117,7 @@ def _build_forecast_features(
 
     # Fill any missing lags with the overall mean from training
     for lag_col in [f"lag_{lag_days}d" for lag_days in LAG_DAYS]:
-        if df[lag_col].isna().any():
-            mean_val = historical_data["price"].mean()
-            df[lag_col] = df[lag_col].fillna(mean_val)
+        df[lag_col] = df[lag_col].fillna(mean_val)
 
     return df
 

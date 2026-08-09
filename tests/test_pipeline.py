@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from forecast_pipeline.pipeline import ForecastOutput, forecast_pipeline
@@ -56,6 +57,46 @@ def test_malformed_historical_data_raises_non_monotonic_index(pre_nov_2024_scena
     shuffled = history.sample(frac=1, random_state=1)
     with pytest.raises(ValueError):
         forecast_pipeline(as_of, shuffled)
+
+
+def test_baseline_forecast_field_exists(pre_nov_2024_scenario):
+    """ForecastOutput has a baseline_forecast field (ticket 05)."""
+    as_of, history = pre_nov_2024_scenario
+    result = forecast_pipeline(as_of, history)
+    assert hasattr(result, "baseline_forecast")
+
+
+def test_baseline_forecast_is_series(pre_nov_2024_scenario):
+    """baseline_forecast is a pd.Series."""
+    as_of, history = pre_nov_2024_scenario
+    result = forecast_pipeline(as_of, history)
+    assert isinstance(result.baseline_forecast, pd.Series)
+
+
+@pytest.mark.parametrize(
+    "scenario_name, expected_rows",
+    [
+        ("pre_nov_2024_scenario", 24),
+        ("straddle_nov_2024_scenario", 24),
+        ("post_oct_2025_scenario", 96),
+    ],
+)
+def test_baseline_forecast_row_count_matches_mtu_grid(scenario_name, expected_rows, request):
+    """baseline_forecast has one value per MTU slot in forecast day."""
+    as_of, history = request.getfixturevalue(scenario_name)
+    result = forecast_pipeline(as_of, history)
+    assert len(result.baseline_forecast) == expected_rows
+
+
+@pytest.mark.parametrize(
+    "scenario_name",
+    ["pre_nov_2024_scenario", "straddle_nov_2024_scenario", "post_oct_2025_scenario"],
+)
+def test_baseline_forecast_no_nans(scenario_name, request):
+    """baseline_forecast has no NaN values (LEAR fallback ensures coverage)."""
+    as_of, history = request.getfixturevalue(scenario_name)
+    result = forecast_pipeline(as_of, history)
+    assert not result.baseline_forecast.isna().any()
 
 
 def test_too_short_historical_data_raises(malformed_input_scenario):

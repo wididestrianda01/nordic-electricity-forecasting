@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.linear_model import Lasso
 
 from forecast_pipeline.pipeline import _mtu_minutes_for, _validate
+from forecast_pipeline.regime_boundaries import crosses_boundary
 
 LAG_DAYS = (1, 2, 3, 7)
 
@@ -67,6 +68,15 @@ def lear_forecast(
             ) from None
 
         features = pd.concat({lag: series.shift(lag) for lag in lag_days}, axis=1)
+
+        # Mask lags that cross regime boundaries (ticket 05, ADR-0007)
+        # so training data doesn't blend inconsistent price regimes.
+        for day in features.index:
+            for lag in lag_days:
+                lag_day = day - pd.Timedelta(days=lag)
+                if crosses_boundary(day.date(), lag_day.date()):
+                    features.loc[day, lag] = pd.NA
+
         target = series
         train = features.assign(target=target).dropna()
 
@@ -84,13 +94,20 @@ def lear_forecast(
         query_dict: dict[int, float] = {}
         for lag in lag_days:
             lag_date = query_day - pd.Timedelta(days=lag)
-            try:
-                query_dict[lag] = pivot[slot_id].loc[lag_date]
-            except KeyError:
-                raise ValueError(
-                    f"Missing lag date {lag_date.date()} for slot {slot_id} in pivot. "
-                    f"Historical data must span at least {max(lag_days)} days before forecast date."
-                ) from None
+            lag_day = lag_date.date()
+
+            # For boundary-crossing lags, use mean fallback (ticket 05, ADR-0007)
+            # instead of raising an error. This mirrors lgbm.py's behavior.
+            if crosses_boundary(as_of_date, lag_day):
+                query_dict[lag] = series.mean()
+            else:
+                try:
+                    query_dict[lag] = pivot[slot_id].loc[lag_date]
+                except KeyError:
+                    raise ValueError(
+                        f"Missing lag date {lag_date.date()} for slot {slot_id} in pivot. "
+                        f"Historical data must span at least {max(lag_days)} days before forecast date."
+                    ) from None
         query = pd.Series(query_dict)
         predictions.append(model.predict(query.to_frame().T[list(lag_days)])[0])
 

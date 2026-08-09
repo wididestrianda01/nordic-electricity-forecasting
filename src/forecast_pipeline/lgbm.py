@@ -20,6 +20,7 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 
 from forecast_pipeline.regime import detect_regimes
+from forecast_pipeline.regime_boundaries import crosses_boundary
 
 LAG_DAYS = (1, 2, 3, 7)
 
@@ -42,9 +43,17 @@ def _build_training_features(
 
     # Create lag features
     for lag_days in LAG_DAYS:
-        df[f"lag_{lag_days}d"] = df["price"].shift(lag_days * 24 * 60 // mtu_minutes)
+        lag_col = f"lag_{lag_days}d"
+        df[lag_col] = df["price"].shift(lag_days * 24 * 60 // mtu_minutes)
 
-    # Drop rows with NaN lags (first 7 days)
+        # Mask lags that cross regime boundaries (ticket 05, ADR-0007)
+        # to prevent training on inconsistent price regimes.
+        for idx in df.index:
+            lag_date = (idx - pd.Timedelta(days=lag_days)).date()
+            if crosses_boundary(idx.date(), lag_date):
+                df.loc[idx, lag_col] = np.nan
+
+    # Drop rows with NaN lags (first 7 days + boundary-masked rows)
     df = df.dropna(subset=[f"lag_{lag_days}d" for lag_days in LAG_DAYS])
 
     if len(df) == 0:
@@ -76,11 +85,18 @@ def _build_forecast_features(
         # Collect lags from historical data
         for lag_days in LAG_DAYS:
             lag_ts = forecast_ts - pd.Timedelta(days=lag_days)
-            lag_val = historical_data[historical_data.index == lag_ts]["price"].values
-            if len(lag_val) > 0:
-                row[f"lag_{lag_days}d"] = lag_val[0]
-            else:
+            lag_date = lag_ts.date()
+
+            # Mask lags that cross regime boundaries (ticket 05, ADR-0007)
+            # instead of looking them up in historical data.
+            if crosses_boundary(as_of_date, lag_date):
                 row[f"lag_{lag_days}d"] = np.nan
+            else:
+                lag_val = historical_data[historical_data.index == lag_ts]["price"].values
+                if len(lag_val) > 0:
+                    row[f"lag_{lag_days}d"] = lag_val[0]
+                else:
+                    row[f"lag_{lag_days}d"] = np.nan
 
         forecast_rows.append(row)
 
@@ -90,7 +106,7 @@ def _build_forecast_features(
     for lag_col in [f"lag_{lag_days}d" for lag_days in LAG_DAYS]:
         if df[lag_col].isna().any():
             mean_val = historical_data["price"].mean()
-            df[lag_col].fillna(mean_val, inplace=True)
+            df[lag_col] = df[lag_col].fillna(mean_val)
 
     return df
 

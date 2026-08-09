@@ -25,6 +25,7 @@ class ForecastOutput:
     as_of_date: date
     mtu_minutes: int
     forecast: pd.DataFrame  # index: MTU start (UTC); columns: p10, p50, p90, regime
+    baseline_forecast: pd.Series  # LEAR baseline point forecast, for comparison (ticket 03/05)
 
 
 def _mtu_minutes_for(as_of_date: date) -> int:
@@ -57,4 +58,16 @@ def forecast_pipeline(as_of_date: date, historical_data: pd.DataFrame) -> Foreca
     # Use regime-conditional LightGBM quantile regression (ticket 04)
     forecast = lgbm_quantile_forecast(as_of_date, historical_data, mtu_minutes)
 
-    return ForecastOutput(as_of_date=as_of_date, mtu_minutes=mtu_minutes, forecast=forecast)
+    # Local import to avoid circular dependency: lear.py imports _mtu_minutes_for, _validate
+    # from this module at module load time, so a top-level import here would create a cycle
+    # (pipeline -> lear -> pipeline before pipeline finishes defining those names).
+    from forecast_pipeline.lear import lear_forecast  # noqa: E402
+
+    baseline_forecast = lear_forecast(as_of_date, historical_data)
+
+    return ForecastOutput(
+        as_of_date=as_of_date,
+        mtu_minutes=mtu_minutes,
+        forecast=forecast,
+        baseline_forecast=baseline_forecast,
+    )

@@ -149,3 +149,89 @@ def test_boundary_all_lags_masked_warns_lear():
         with pytest.warns(UserWarning, match=r"all lags boundary-masked"):
             forecast = lear_forecast(as_of, history)
             assert len(forecast) == 96  # 96 15-min slots
+
+
+def test_lear_accepts_load_wind_columns(pre_nov_2024_scenario):
+    """Test that lear_forecast accepts load_forecast and wind_forecast columns."""
+    as_of, history = pre_nov_2024_scenario
+    # Should not raise an error even with load/wind columns present
+    forecast = lear_forecast(as_of, history)
+    assert len(forecast) == 24
+    assert not forecast.isna().any()
+
+
+def test_lear_uses_load_wind_features(pre_nov_2024_scenario):
+    """Test that lear_forecast uses load/wind as features (forecast differs with vs without)."""
+    as_of, history = pre_nov_2024_scenario
+    forecast_with = lear_forecast(as_of, history)
+
+    # Remove load/wind columns and re-forecast
+    history_no_features = history[["price"]].copy()
+    forecast_without = lear_forecast(as_of, history_no_features)
+
+    # Forecasts should differ because feature set changed (with load/wind as additional features)
+    # Check that at least some values are different
+    differences = np.abs(forecast_with.values - forecast_without.values)
+    assert np.max(differences) > 0.01  # At least some meaningful difference
+
+
+def test_lear_load_wind_boundary_masking_pre_nov_2024(pre_nov_2024_scenario):
+    """Test that load/wind values are masked when crossing regime boundaries (pre_nov_2024)."""
+    from unittest import mock
+    from forecast_pipeline import regime_boundaries
+
+    as_of, history = pre_nov_2024_scenario
+    original_crosses = regime_boundaries.crosses_boundary
+
+    # Mock to force masking of all features (lags + load/wind)
+    def mock_crosses_boundary(as_of_date, lag_day):
+        if as_of_date == as_of:
+            return True  # All features masked in forecast
+        else:
+            return original_crosses(as_of_date, lag_day)
+
+    with mock.patch("forecast_pipeline.lear.crosses_boundary", side_effect=mock_crosses_boundary):
+        # Should warn because all features (including load/wind) are masked
+        with pytest.warns(UserWarning, match=r"all lags boundary-masked"):
+            forecast = lear_forecast(as_of, history)
+            assert len(forecast) == 24
+
+
+def test_lear_load_wind_boundary_masking_straddle_nov_2024(straddle_nov_2024_scenario):
+    """Test load/wind masking at boundary-straddling scenario."""
+    from unittest import mock
+    from forecast_pipeline import regime_boundaries
+
+    as_of, history = straddle_nov_2024_scenario
+    original_crosses = regime_boundaries.crosses_boundary
+
+    def mock_crosses_boundary(as_of_date, lag_day):
+        if as_of_date == as_of:
+            return True
+        else:
+            return original_crosses(as_of_date, lag_day)
+
+    with mock.patch("forecast_pipeline.lear.crosses_boundary", side_effect=mock_crosses_boundary):
+        with pytest.warns(UserWarning, match=r"all lags boundary-masked"):
+            forecast = lear_forecast(as_of, history)
+            assert len(forecast) == 24
+
+
+def test_lear_load_wind_boundary_masking_post_oct_2025(post_oct_2025_scenario):
+    """Test load/wind masking at post_oct_2025 scenario (15-min MTU)."""
+    from unittest import mock
+    from forecast_pipeline import regime_boundaries
+
+    as_of, history = post_oct_2025_scenario
+    original_crosses = regime_boundaries.crosses_boundary
+
+    def mock_crosses_boundary(as_of_date, lag_day):
+        if as_of_date == as_of:
+            return True
+        else:
+            return original_crosses(as_of_date, lag_day)
+
+    with mock.patch("forecast_pipeline.lear.crosses_boundary", side_effect=mock_crosses_boundary):
+        with pytest.warns(UserWarning, match=r"all lags boundary-masked"):
+            forecast = lear_forecast(as_of, history)
+            assert len(forecast) == 96

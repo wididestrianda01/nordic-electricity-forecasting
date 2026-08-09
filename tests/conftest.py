@@ -10,7 +10,12 @@ def _hourly_history(end: date, days: int) -> pd.DataFrame:
     index = pd.date_range(start, periods=days * 24, freq="h", tz="UTC")
     rng = np.random.default_rng(seed=42)
     prices = rng.normal(loc=40.0, scale=10.0, size=len(index))
-    return pd.DataFrame({"price": prices}, index=index)
+    loads = rng.normal(loc=6000.0, scale=500.0, size=len(index))
+    winds = rng.normal(loc=1500.0, scale=300.0, size=len(index))
+    return pd.DataFrame(
+        {"price": prices, "load_forecast": loads, "wind_forecast": winds},
+        index=index,
+    )
 
 
 def _15min_history(end: date, days: int) -> pd.DataFrame:
@@ -18,7 +23,12 @@ def _15min_history(end: date, days: int) -> pd.DataFrame:
     index = pd.date_range(start, periods=days * 96, freq="15min", tz="UTC")
     rng = np.random.default_rng(seed=42)
     prices = rng.normal(loc=40.0, scale=10.0, size=len(index))
-    return pd.DataFrame({"price": prices}, index=index)
+    loads = rng.normal(loc=6000.0, scale=500.0, size=len(index))
+    winds = rng.normal(loc=1500.0, scale=300.0, size=len(index))
+    return pd.DataFrame(
+        {"price": prices, "load_forecast": loads, "wind_forecast": winds},
+        index=index,
+    )
 
 
 @pytest.fixture
@@ -55,7 +65,12 @@ def two_regime_scenario() -> tuple[date, pd.DataFrame]:
     low_regime = rng.normal(loc=20.0, scale=3.0, size=half)
     high_regime = rng.normal(loc=80.0, scale=15.0, size=len(index) - half)
     prices = np.concatenate([low_regime, high_regime])
-    return as_of, pd.DataFrame({"price": prices}, index=index)
+    loads = rng.normal(loc=6000.0, scale=500.0, size=len(index))
+    winds = rng.normal(loc=1500.0, scale=300.0, size=len(index))
+    return as_of, pd.DataFrame(
+        {"price": prices, "load_forecast": loads, "wind_forecast": winds},
+        index=index,
+    )
 
 
 @pytest.fixture
@@ -81,4 +96,9 @@ def regime_shift_to_high_scenario() -> tuple[date, pd.DataFrame]:
     low_regime = rng.normal(loc=20.0, scale=3.0, size=half)
     high_regime = rng.normal(loc=80.0, scale=15.0, size=len(index) - half)
     prices = np.concatenate([low_regime, high_regime])
-    return as_of, pd.DataFrame({"price": prices}, index=index)
+    loads = rng.normal(loc=6000.0, scale=500.0, size=len(index))
+    winds = rng.normal(loc=1500.0, scale=300.0, size=len(index))
+    return as_of, pd.DataFrame(
+        {"price": prices, "load_forecast": loads, "wind_forecast": winds},
+        index=index,
+    )

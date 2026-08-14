@@ -255,6 +255,43 @@ def test_run_backtest_15min_regime_e2e(tmp_path):
     assert bool(np.isfinite(result["mae"]).all())
 
 
+def test_run_backtest_feature_columns_restricts_full_features(monkeypatch, tmp_path):
+    """feature_columns subsets the train + horizon matrices for full-features arms."""
+    history = _hourly_frame_between(date(2024, 1, 1), date(2024, 1, 30))
+    spec = _spec("lgbm")
+    captured: dict = {}
+    real_build_model = backtest.build_model
+ 
+    def spy_build_model(spec):
+        arm = real_build_model(spec)
+
+        class Spy:
+            def fit(self, target, features=None):
+                captured["features"] = features
+                arm.fit(target, features)
+                return self
+
+            def predict_quantiles(self, horizon, future_features=None):
+                captured["future_features"] = future_features
+                return arm.predict_quantiles(horizon, future_features)
+
+        return Spy()
+
+    monkeypatch.setattr(backtest, "build_model", spy_build_model)
+
+    subset = ["regime"]
+    run_backtest(
+        history,
+        [spec],
+        [date(2024, 1, 28)],
+        tracking_uri=str(tmp_path / "mlruns"),
+        log=False,
+        feature_columns=subset,
+    )
+
+    assert list(captured["features"].columns) == subset
+    assert list(captured["future_features"].columns) == subset
+
 def test_run_backtest_rejects_mixed_frequency():
     history = _two_regime_frame()
     with pytest.raises(ValueError, match="single-frequency"):

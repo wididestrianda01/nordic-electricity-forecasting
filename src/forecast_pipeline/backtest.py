@@ -201,6 +201,7 @@ def _run_fold(
     tz: Any,
     mtu_minutes: int,
     log: bool,
+    feature_columns: list[str] | None,
 ) -> dict[str, Any]:
     """Fit, predict, and score one (spec, cutoff) fold; return its result row."""
     cutoff_ts = _cutoff_timestamp(cutoff, tz)
@@ -209,10 +210,12 @@ def _run_fold(
     train = historical_data.loc[historical_data.index < cutoff_ts]
     actuals = _actuals_for(historical_data, cutoff_ts)
     target = train["price"]
-
     if spec.feature_set == "full-features":
         _, features = build_features(cutoff, train)
         future_features = build_horizon_features(cutoff, train)
+        if feature_columns is not None:
+            features = features[feature_columns]
+            future_features = future_features[feature_columns]
     else:
         features = None
         future_features = None
@@ -273,7 +276,6 @@ def _run_fold(
         "inference_wall_clock": inference_wall_clock,
     }
 
-
 def run_backtest(
     historical_data: pd.DataFrame,
     specs: list[ModelSpec] | tuple[ModelSpec, ...],
@@ -281,12 +283,18 @@ def run_backtest(
     *,
     tracking_uri: str = "mlruns",
     log: bool = True,
+    feature_columns: list[str] | None = None,
 ) -> pd.DataFrame:
     """Run the walk-forward backtest; return one row per (model, cutoff).
 
     When ``log=True`` each model config gets a parent run (via
     ``start_parent_run``) and every fold nests a child run (via
     ``start_fold_run``) beneath it, with metrics and quantile artifacts logged.
+
+    ``feature_columns`` restricts full-features specs to the named columns
+    (both the train matrix and the horizon matrix); ``None`` uses every
+    canonical column. Price-only specs are unaffected. Used by the feature
+    ablation and transfer check to run a model on a feature subset.
     """
     if log:
         set_local_tracking_uri(tracking_uri)
@@ -317,7 +325,14 @@ def run_backtest(
             for cutoff_index, cutoff in enumerate(cutoffs):
                 rows.append(
                     _run_fold(
-                        historical_data, spec, cutoff, cutoff_index, tz, mtu_minutes, log
+                        historical_data,
+                        spec,
+                        cutoff,
+                        cutoff_index,
+                        tz,
+                        mtu_minutes,
+                        log,
+                        feature_columns,
                     )
                 )
     return pd.DataFrame(rows, columns=RESULT_COLUMNS)

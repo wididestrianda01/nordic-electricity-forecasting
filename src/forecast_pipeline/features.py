@@ -19,6 +19,7 @@ regime boundary (4 Nov 2024, 1 Oct 2025) are masked to NaN via
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -169,6 +170,75 @@ def build_features(
     price_only = _price_features(historical_data, mtu_minutes)
     full_features = pd.concat([price_only, _exogenous_columns(historical_data)], axis=1)
     return price_only, full_features
+
+
+def _forecast_grid(historical_data: pd.DataFrame, mtu_minutes: int) -> pd.DatetimeIndex:
+    """Return the D+1 forecast grid: one MTU step past the last history row."""
+    periods_per_day = 24 * 60 // mtu_minutes
+    start = historical_data.index[-1] + pd.Timedelta(minutes=mtu_minutes)
+    return pd.date_range(start, periods=periods_per_day, freq=f"{mtu_minutes}min")
+
+
+def _price_only_horizon(
+    historical_data: pd.DataFrame,
+    grid: pd.DatetimeIndex,
+    mtu_minutes: int,
+    regime_label: str,
+) -> pd.DataFrame:
+    """Group-1 (price-only) features on the forecast grid.
+
+    Lags and rolling features are computed by extending the price series with
+    the unknown horizon (NaN), reusing the exact shift / rolling /
+    boundary-masking logic from ``build_features``. Lags resolve to
+    strictly-past published prices; rolling windows that reach into the
+    unknown horizon stay NaN (LightGBM treats missing covariates natively).
+    """
+    price = historical_data["price"]
+    extended_index = cast(pd.DatetimeIndex, price.index.union(grid))
+    extended = price.reindex(extended_index).sort_index()
+    lags = _lag_features(extended, extended_index, mtu_minutes).loc[grid]
+    rolls = _rolling_features(extended, extended_index, mtu_minutes).loc[grid]
+    calendar = _calendar_features(grid)
+    out = pd.concat([lags, rolls, calendar], axis=1)
+    out["regime"] = regime_label
+    return out
+
+
+def _exogenous_horizon(historical_data: pd.DataFrame, grid: pd.DatetimeIndex) -> pd.DataFrame:
+    """Group-2 (exogenous) features on the forecast grid.
+
+    Every exogenous value is forward-filled from the last published row, so the
+    horizon never uses a value published after the as-of date -- the
+    as-of-timing rule (day-ahead load/wind, one-day-lagged weather, prior-day
+    FX/carbon close, forward-filled hydro).
+    """
+    exog_cols = [c for c in historical_data.columns if c != "price"]
+    if not exog_cols:
+        return pd.DataFrame(index=grid)
+    exog = historical_data[exog_cols]
+    return exog.reindex(exog.index.union(grid)).ffill().reindex(grid)
+
+
+def build_horizon_features(as_of_date: date, historical_data: pd.DataFrame) -> pd.DataFrame:
+    """Return the full-features matrix for the D+1 forecast grid.
+
+    Columns are identical to ``build_features(as_of_date, historical_data)[1]``
+    (the canonical full-features matrix); the index is the D+1 forecast grid
+    (24 hourly or 96 15-minute rows). No value is published after ``as_of_date``:
+    price lags/rolling look strictly backwards (rolling into the unknown horizon
+    is NaN), calendar/regime derive from the grid / most-recent label, and every
+    exogenous value is forward-filled from the last published row.
+    """
+    mtu_minutes = _mtu_minutes_for(as_of_date)
+    _validate(historical_data, mtu_minutes)
+    _, full_features = build_features(as_of_date, historical_data)
+
+    grid = _forecast_grid(historical_data, mtu_minutes)
+    horizon = _price_only_horizon(
+        historical_data, grid, mtu_minutes, full_features["regime"].iloc[-1]
+    )
+    horizon = pd.concat([horizon, _exogenous_horizon(historical_data, grid)], axis=1)
+    return horizon[list(full_features.columns)]
 
 
 def assemble_data(zones, start: date, end: date) -> pd.DataFrame:

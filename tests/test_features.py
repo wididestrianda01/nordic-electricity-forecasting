@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 
 from forecast_pipeline import features
-from forecast_pipeline.features import assemble_data, build_features
+from forecast_pipeline.features import (
+    assemble_data,
+    build_features,
+    build_horizon_features,
+)
 
 PRICE_ONLY_COLUMNS = [
     "lag_1d",
@@ -299,3 +303,58 @@ def test_assemble_data_lags_weather_by_one_day(monkeypatch):
     assert np.isnan(df.loc[day0, col])
     # Weather at day1 equals realized weather at day0 (t-1), not day1's own 1.0.
     assert df.loc[day1, col] == 0.0
+
+
+def test_build_horizon_features_matches_full_features_columns(pre_nov_2024_scenario):
+    as_of, history = pre_nov_2024_scenario
+    _, full = build_features(as_of, history)
+    horizon = build_horizon_features(as_of, history)
+
+    assert list(horizon.columns) == list(full.columns)
+    # D+1 grid: one MTU step past the last history row, one full day.
+    assert horizon.index.equals(
+        pd.date_range(history.index[-1] + pd.Timedelta(hours=1), periods=24, freq="h")
+    )
+
+
+def test_build_horizon_features_15min_grid(post_oct_2025_scenario):
+    as_of, history = post_oct_2025_scenario
+    horizon = build_horizon_features(as_of, history)
+
+    assert len(horizon) == 96
+    assert horizon.index.equals(
+        pd.date_range(history.index[-1] + pd.Timedelta(minutes=15), periods=96, freq="15min")
+    )
+
+
+def test_build_horizon_features_exogenous_forward_filled_no_leakage():
+    """Horizon exogenous values are forward-filled from the last published row."""
+    as_of = date(2024, 6, 15)
+    frame = _assembled_frame(as_of, days=30)
+    _, full = build_features(as_of, frame)
+    horizon = build_horizon_features(as_of, frame)
+
+    # Every exogenous column is constant across the horizon and equals its last
+    # published value -- so no value published after as_of can appear.
+    for col in EXOGENOUS_COLUMNS:
+        assert (horizon[col] == full[col].iloc[-1]).all()
+
+
+def test_build_horizon_features_lags_use_strictly_past_prices():
+    as_of = date(2024, 6, 15)
+    frame = _assembled_frame(as_of, days=30)
+    horizon = build_horizon_features(as_of, frame)
+    price = frame["price"]
+
+    for lag in (1, 2, 3, 7, 14, 28):
+        col = f"lag_{lag}d"
+        expected = price.reindex(horizon.index - pd.Timedelta(days=lag)).to_numpy()
+        np.testing.assert_allclose(horizon[col].to_numpy(), expected)
+
+
+def test_build_horizon_features_regime_is_persisted(pre_nov_2024_scenario):
+    as_of, history = pre_nov_2024_scenario
+    _, full = build_features(as_of, history)
+    horizon = build_horizon_features(as_of, history)
+
+    assert (horizon["regime"] == full["regime"].iloc[-1]).all()

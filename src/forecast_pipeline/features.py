@@ -24,6 +24,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
+from forecast_pipeline import datacache
 from forecast_pipeline.ingestion import fetch_market_data
 from forecast_pipeline.ingestion_external import fetch_carbon, fetch_fx, fetch_weather
 from forecast_pipeline.ingestion_transparency import fetch_cross_border, fetch_hydro
@@ -241,17 +242,28 @@ def build_horizon_features(as_of_date: date, historical_data: pd.DataFrame) -> p
     return horizon[list(full_features.columns)]
 
 
-def assemble_data(zones, start: date, end: date) -> pd.DataFrame:
+def assemble_data(zones, start: date, end: date, *, refresh: bool = False) -> pd.DataFrame:
     """Join all ingestion outputs into one MTU-indexed frame.
 
     The first zone is the forecast target (its price/load/wind); every zone
     contributes weather, hydro, and cross-border features. Weather's
     `(zone, variable)` MultiIndex columns are flattened to `ZONE_variable`.
+
+    The joined frame is cached to disk (see `datacache`) keyed by zones and
+    date range, so a re-run within the same window skips the network. Pass
+    `refresh=True` to re-fetch after a fetcher or schema change.
     """
+
     zone_list = [zones] if isinstance(zones, str) else list(zones)
     if not zone_list:
         raise ValueError("zones must be a non-empty sequence of bidding zones")
     primary = zone_list[0]
+
+    params = {"zones": zone_list}
+    if not refresh:
+        cached = datacache.load("assemble_data", start, end, params)
+        if cached is not None:
+            return cached
 
     market = fetch_market_data(primary, start, end)
 
@@ -267,6 +279,8 @@ def assemble_data(zones, start: date, end: date) -> pd.DataFrame:
     fx = fetch_fx(start, end)
     carbon = fetch_carbon(start, end)
 
-    return pd.concat(
+    frame = pd.concat(
         [market, weather, hydro, cross_border, fx, carbon], axis=1
     ).sort_index()
+    datacache.store("assemble_data", start, end, params, frame)
+    return frame

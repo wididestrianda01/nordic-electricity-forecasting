@@ -102,3 +102,9 @@ def regime_shift_to_high_scenario() -> tuple[date, pd.DataFrame]:
         {"price": prices, "load_forecast": loads, "wind_forecast": winds},
         index=index,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_datacache(tmp_path, monkeypatch):
+    """Point the disk cache at a per-test temp dir so tests never touch data/cache/."""
+    monkeypatch.setenv("FORECAST_CACHE_DIR", str(tmp_path / "cache"))

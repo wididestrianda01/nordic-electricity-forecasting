@@ -305,6 +305,68 @@ def test_assemble_data_lags_weather_by_one_day(monkeypatch):
     assert df.loc[day1, col] == 0.0
 
 
+def test_assemble_data_caches_and_reuses(monkeypatch):
+    """A re-run with the same zones/range skips the network entirely."""
+    start, end = date(2024, 10, 1), date(2024, 10, 3)
+    grid = pd.date_range(
+        pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC"), freq="h", inclusive="left"
+    )
+    calls = []
+
+    def market(zone, s, e):
+        calls.append("market")
+        return pd.DataFrame(
+            {"price": 1.0, "load_forecast": 2.0, "wind_forecast": 3.0}, index=grid
+        )
+
+    def weather(zones, s, e):
+        calls.append("weather")
+        cols = pd.MultiIndex.from_product(
+            [[zones[0]], ["temperature_2m"]], names=["zone", "variable"]
+        )
+        return pd.DataFrame(np.ones((len(grid), 1)), index=grid, columns=cols)
+
+    def hydro(zones, s, e):
+        calls.append("hydro")
+        return pd.DataFrame({"hydro_storage_mwh": 4.0}, index=grid)
+
+    def cross_border(zones, s, e):
+        calls.append("cross_border")
+        return pd.DataFrame(
+            {
+                "net_position_mwh": 5.0,
+                "scheduled_exchange_mwh": 6.0,
+                "neighbour_price_eur_mwh": 7.0,
+            },
+            index=grid,
+        )
+
+    def fx(s, e):
+        calls.append("fx")
+        return pd.DataFrame({"fx_sek_eur": 8.0}, index=grid)
+
+    def carbon(s, e):
+        calls.append("carbon")
+        return pd.DataFrame({"carbon_eua": 9.0}, index=grid)
+
+    monkeypatch.setattr(features, "fetch_market_data", market)
+    monkeypatch.setattr(features, "fetch_weather", weather)
+    monkeypatch.setattr(features, "fetch_hydro", hydro)
+    monkeypatch.setattr(features, "fetch_cross_border", cross_border)
+    monkeypatch.setattr(features, "fetch_fx", fx)
+    monkeypatch.setattr(features, "fetch_carbon", carbon)
+
+    first = assemble_data(["SE1"], start, end)
+    second = assemble_data(["SE1"], start, end)
+
+    # Every fetcher ran exactly once -- the second call was served from cache.
+    assert len(calls) == 6
+    pd.testing.assert_frame_equal(first, second, check_freq=False)
+
+    assemble_data(["SE1"], start, end, refresh=True)
+    assert len(calls) == 12  # refresh bypasses the cache and re-fetches every source
+
+
 def test_build_horizon_features_matches_full_features_columns(pre_nov_2024_scenario):
     as_of, history = pre_nov_2024_scenario
     _, full = build_features(as_of, history)

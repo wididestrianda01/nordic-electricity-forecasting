@@ -1,7 +1,7 @@
 .scratch/
 mlruns/
 catboost_info/
-
+data/cache/
 context/
 
 .venv/

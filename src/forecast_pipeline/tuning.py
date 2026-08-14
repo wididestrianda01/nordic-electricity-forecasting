@@ -247,13 +247,9 @@ def build_tuned_table(
             "tuned_hyperparams",
         ],
     )
-
-
-# --- orchestration -----------------------------------------------------------
-
-
 def _mean_crps_by_model(result: pd.DataFrame) -> dict[str, float]:
-    return result.groupby("model")["crps"].mean().to_dict()
+    means = result.groupby("model")["crps"].mean()
+    return {str(model): float(value) for model, value in means.items()}
 
 
 def run_tuned_comparison(
@@ -294,14 +290,13 @@ def run_tuned_comparison(
     default_specs = [s for s in DEFAULT_SPECS if s.name in TUNED_MODELS]
     families = {m: _family_of(m) for m in TUNED_MODELS}
 
-    # Comparable CRPS across every fold (default + tuned, no MLflow logging).
-    comparison = run_backtest(
-        historical_data, [*default_specs, *tuned_specs], cutoffs, log=False
-    )
-    tuned_names = {s.name for s in tuned_specs}
-    comparison["is_tuned"] = comparison["model"].isin(tuned_names)
-    default_crps = _mean_crps_by_model(comparison[~comparison["is_tuned"]])
-    tuned_crps = _mean_crps_by_model(comparison[comparison["is_tuned"]])
+    # Comparable CRPS across every fold (default and tuned run separately, no
+    # MLflow logging). They share model names, so they must be scored in
+    # separate passes to keep the default and tuned means distinct.
+    default_result = run_backtest(historical_data, default_specs, cutoffs, log=False)
+    tuned_result = run_backtest(historical_data, tuned_specs, cutoffs, log=False)
+    default_crps = _mean_crps_by_model(default_result)
+    tuned_crps = _mean_crps_by_model(tuned_result)
 
     # Record the tuned runs in MLflow.
     run_backtest(

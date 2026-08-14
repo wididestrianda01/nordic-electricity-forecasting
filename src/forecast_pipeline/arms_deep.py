@@ -26,6 +26,7 @@ from darts.utils.likelihood_models import GaussianLikelihood
 from pandas.tseries.offsets import BaseOffset
 
 from forecast_pipeline.darts_seam import (
+    encode_regime,
     frame_to_time_series,
     quantiles_to_frame,
     series_to_time_series,
@@ -160,7 +161,11 @@ class TftArm:
 
     def _covariates(self, features: pd.DataFrame) -> pd.DataFrame:
         cols = [c for c in features.columns if c not in self.EXCLUDED_COVARIATES]
-        return features[cols]
+        frame = features[cols]
+        if "regime" in frame.columns:
+            frame = frame.copy()
+            frame["regime"] = encode_regime(frame["regime"])
+        return frame
 
     def fit(
         self, target: pd.Series, features: pd.DataFrame | None = None

@@ -5,11 +5,30 @@ import pandas as pd
 from darts import TimeSeries
 
 from forecast_pipeline.darts_seam import (
+    encode_regime,
     frame_to_time_series,
     quantiles_to_frame,
     series_to_time_series,
 )
 
+
+def test_encode_regime_maps_string_labels_to_integers():
+    idx = pd.date_range("2024-06-15", periods=4, freq="h")
+    series = pd.Series(["regime_0", "regime_1", "regime_1", "regime_0"], index=idx)
+
+    encoded = encode_regime(series)
+
+    assert list(encoded) == [0.0, 1.0, 1.0, 0.0]
+    assert encoded.dtype == float
+
+
+def test_encode_regime_preserves_numeric_labels():
+    idx = pd.date_range("2024-06-15", periods=3, freq="h")
+    series = pd.Series([0.0, 2.0, 1.0], index=idx)
+
+    encoded = encode_regime(series)
+
+    assert list(encoded) == [0.0, 2.0, 1.0]
 
 def test_series_to_time_series_wraps_hourly_price():
     idx = pd.date_range("2024-06-15", periods=48, freq="h", tz="UTC")

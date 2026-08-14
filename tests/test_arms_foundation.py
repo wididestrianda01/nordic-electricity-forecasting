@@ -35,8 +35,20 @@ class _FakeModel:
         self.output_chunk_length = output_chunk_length
         self.likelihood = likelihood
         self.predict_calls: list[dict] = []
+        self.fit_calls: list[dict] = []
+        self._series = None
         _FakeModel.instances.append(self)
 
+    def fit(self, series, past_covariates=None, future_covariates=None, **kwargs):
+        self._series = series
+        self.fit_calls.append(
+            {
+                "series": series,
+                "past_covariates": past_covariates,
+                "future_covariates": future_covariates,
+            }
+        )
+        return self
     def predict(
         self,
         n,
@@ -57,6 +69,7 @@ class _FakeModel:
                 "random_state": random_state,
             }
         )
+        series = series if series is not None else self._series
         start = series.end_time() + series.freq
         times = pd.date_range(start=start, periods=n, freq=series.freq)
         base = np.arange(n, dtype=float)
@@ -64,7 +77,6 @@ class _FakeModel:
         for i in range(num_samples):
             values[:, 0, i] = base + i
         return TimeSeries.from_times_and_values(times, values)
-
 
 def _patch_model(monkeypatch, model_attr: str) -> None:
     _FakeModel.instances = []
@@ -168,11 +180,13 @@ def test_chronos_passes_past_covariates_excluding_load_wind(monkeypatch, pre_nov
     assert model.likelihood is not None
     assert list(model.likelihood.quantiles) == [0.1, 0.5, 0.9]
 
-    call = model.predict_calls[0]
-    cov = call["past_covariates"]
+    fit_call = model.fit_calls[0]
+    cov = fit_call["past_covariates"]
     assert "load_forecast" not in cov.components
     assert "wind_forecast" not in cov.components
     assert "price" not in cov.components
+
+    call = model.predict_calls[0]
     assert call["future_covariates"] is None
     assert call["num_samples"] == arms_foundation.NUM_SAMPLES
     assert call["random_state"] == arms_foundation.SEED
@@ -188,7 +202,7 @@ def test_chronos_passes_future_covariates_for_15min(monkeypatch, post_oct_2025_s
     arm = ChronosArm().fit(history["price"], train)
     arm.predict_quantiles(horizon=96, future_features=horizon)
 
-    call = _FakeModel.instances[0].predict_calls[0]
+    call = _FakeModel.instances[0].fit_calls[0]
     future_cov = call["future_covariates"]
     assert future_cov is not None
     assert "load_forecast" not in future_cov.components

@@ -17,6 +17,7 @@ sets the forecast horizon (24 or 96 steps).
 
 from __future__ import annotations
 
+import logging
 import time
 from contextlib import nullcontext
 from datetime import date, timedelta
@@ -42,6 +43,8 @@ from forecast_pipeline.tracking import (
     start_fold_run,
     start_parent_run,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The only supported fold cadence (locked protocol: yearly refit).
 _YEARLY = "yearly"
@@ -321,18 +324,42 @@ def run_backtest(
             if log
             else nullcontext()
         )
-        with parent_cm:
+        try:
+            with parent_cm:
+                for cutoff_index, cutoff in enumerate(cutoffs):
+                    rows.append(
+                        _run_fold(
+                            historical_data,
+                            spec,
+                            cutoff,
+                            cutoff_index,
+                            tz,
+                            mtu_minutes,
+                            log,
+                            feature_columns,
+                        )
+                    )
+        except Exception:
+            # A single arm failing must not abort the whole comparison: log it,
+            # emit NaN rows so the model is still represented in the table, and
+            # continue with the remaining specs.
+            logger.warning("model %r failed; skipping its folds", spec.name, exc_info=True)
             for cutoff_index, cutoff in enumerate(cutoffs):
                 rows.append(
-                    _run_fold(
-                        historical_data,
-                        spec,
-                        cutoff,
-                        cutoff_index,
-                        tz,
-                        mtu_minutes,
-                        log,
-                        feature_columns,
-                    )
+                    {
+                        "model": spec.name,
+                        "family": spec.family,
+                        "feature_set": spec.feature_set,
+                        "cutoff": cutoff,
+                        "mtu_minutes": mtu_minutes,
+                        "crps": float("nan"),
+                        "pinball_p10": float("nan"),
+                        "pinball_p50": float("nan"),
+                        "pinball_p90": float("nan"),
+                        "mae": float("nan"),
+                        "skill_score_crps": float("nan"),
+                        "train_wall_clock": float("nan"),
+                        "inference_wall_clock": float("nan"),
+                    }
                 )
     return pd.DataFrame(rows, columns=RESULT_COLUMNS)

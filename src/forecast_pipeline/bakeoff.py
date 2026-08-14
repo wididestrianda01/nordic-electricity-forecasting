@@ -1,11 +1,13 @@
 """Ticket 16: bake-off runner -- the full 10-model comparison entrypoint.
 
 Orchestrates ``assemble_data`` -> ``generate_folds`` -> ``run_backtest`` over
-``DEFAULT_SPECS`` for the two regimes separately: the hourly (60-minute) frame
-before the 1 Oct 2025 MTU switch, and the 15-minute frame from the switch
-onward. Each regime is single-frequency, which ``generate_folds`` and
-``run_backtest`` require (ticket 15). Results are concatenated (one row per
-model x cutoff x regime) and saved outside ``mlruns/``.
+``DEFAULT_SPECS`` for the two regimes separately: the hourly (60-minute)
+window before the 1 Oct 2025 MTU switch, and the 15-minute window from the
+switch onward. Each regime is assembled as its own window (so ``assemble_data``
+resolves the correct MTU from each window's ``end`` date) and is
+single-frequency, which ``generate_folds`` and ``run_backtest`` require
+(ticket 15). Results are concatenated (one row per model x cutoff x regime)
+and saved outside ``mlruns/``.
 
 Runnable via ``uv run python -m forecast_pipeline.bakeoff``.
 """
@@ -13,7 +15,7 @@ Runnable via ``uv run python -m forecast_pipeline.bakeoff``.
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -25,25 +27,9 @@ from forecast_pipeline.backtest import (
     run_backtest,
 )
 from forecast_pipeline.features import assemble_data
-from forecast_pipeline.pipeline import _mtu_minutes_for
+from forecast_pipeline.pipeline import MTU_15MIN_SWITCH_DATE
 
 DEFAULT_TEST_START = date(2023, 1, 1)
-
-
-def split_regimes(frame: pd.DataFrame) -> dict[int, pd.DataFrame]:
-    """Split an assembled frame into ``{mtu_minutes: single-frequency frame}``.
-
-    Rows are grouped by the MTU in force on their calendar date (60-minute
-    before the 1 Oct 2025 switch, 15-minute from then on). Empty regimes are
-    dropped; every returned frame is single-frequency.
-    """
-    mtu = pd.Series(
-        [_mtu_minutes_for(ts.date()) for ts in frame.index], index=frame.index
-    )
-    return {
-        minutes: frame.loc[mtu == minutes].sort_index()
-        for minutes in sorted(mtu.unique())
-    }
 
 
 def run_bakeoff(
@@ -60,15 +46,23 @@ def run_bakeoff(
 ) -> pd.DataFrame:
     """Run the full bake-off; return one row per (model, cutoff, regime).
 
-    Assembles data (disk-cached; ``refresh`` bypasses the cache), splits into
-    the hourly and 15-min regimes, and runs the walk-forward backtest over
-    ``specs`` for each regime separately. Saves the combined result to
-    ``out_dir/results.parquet`` and ``out_dir/results.csv``.
+    Assembles the hourly and 15-min windows separately (each window's ``end``
+    date fixes its MTU, so the hourly window stays hourly), then runs the
+    walk-forward backtest over ``specs`` for each regime. Saves the combined
+    result to ``out_dir/results.parquet`` and ``out_dir/results.csv``.
     """
-    frame = assemble_data(zones, start, end, refresh=refresh)
+    # The hourly window ends the day before the MTU switch (so its ``end``
+    # resolves to 60-minute); the 15-min window starts on the switch date.
+    hourly_end = MTU_15MIN_SWITCH_DATE - timedelta(days=1)
+
+    windows: dict[int, pd.DataFrame] = {}
+    if start < MTU_15MIN_SWITCH_DATE:
+        windows[60] = assemble_data(zones, start, hourly_end, refresh=refresh)
+    if end > MTU_15MIN_SWITCH_DATE:
+        windows[15] = assemble_data(zones, MTU_15MIN_SWITCH_DATE, end, refresh=refresh)
 
     parts: list[pd.DataFrame] = []
-    for regime_frame in split_regimes(frame).values():
+    for regime_frame in windows.values():
         cutoffs = generate_folds(regime_frame, test_start=test_start)
         if not cutoffs:
             continue

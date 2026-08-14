@@ -1,12 +1,14 @@
 """Ticket 10: shared darts seam.
 
 Thin adapters between the pandas-based arm contract (ticket 07) and the
-``darts`` models used by the eight model arms (tickets 11-14). Three helpers:
+``darts`` models used by the eight model arms (tickets 11-14). Four helpers:
 
 - ``series_to_time_series`` -- wrap a price ``pd.Series`` as a univariate
   ``darts.TimeSeries``.
 - ``frame_to_time_series`` -- wrap a feature ``pd.DataFrame`` as a
   multivariate ``darts.TimeSeries``.
+- ``encode_regime`` -- integer-encode the categorical ``regime`` covariate so
+  darts (float-only covariates) can consume it.
 - ``quantiles_to_frame`` -- collapse a probabilistic ``darts.TimeSeries``
   into the ``[p10, p50, p90]`` frame every arm must return.
 
@@ -33,6 +35,20 @@ def _naive_utc(obj: pd.Series | pd.DataFrame) -> pd.Series | pd.DataFrame:
     return obj
 
 
+def encode_regime(series: pd.Series) -> pd.Series:
+    """Encode a categorical ``regime`` covariate as numeric floats for darts.
+
+    ``detect_regimes`` emits string labels ``regime_N``; the test fixtures use
+    plain numeric labels. Either way, return the integer state index as a float
+    so darts (which requires float covariates) can consume it. String labels
+    map to their trailing integer, which stays consistent across fit/predict
+    subsets (unlike ``pd.factorize``, which re-indexes on the subset).
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return series.astype(float)
+    return series.astype(str).str.extract(r"(\d+)$", expand=False).astype(float)
+
+
 def series_to_time_series(series: pd.Series) -> TimeSeries:
     """Wrap a price ``Series`` as a univariate ``darts.TimeSeries``.
 
@@ -48,9 +64,11 @@ def frame_to_time_series(frame: pd.DataFrame) -> TimeSeries:
     """Wrap a feature ``DataFrame`` as a multivariate ``darts.TimeSeries``.
 
     Each column becomes one component. Same index requirements as
-    ``series_to_time_series``.
+    ``series_to_time_series``. NaN covariates (lag/rolling warm-up and
+    boundary-masked cells) are zero-filled: the tree arms handle NaN natively,
+    but the neural/foundation darts arms require clean float inputs.
     """
-    return TimeSeries.from_dataframe(_naive_utc(frame))
+    return TimeSeries.from_dataframe(_naive_utc(frame).fillna(0.0))
 
 
 def quantiles_to_frame(prob_ts: TimeSeries, index: pd.DatetimeIndex) -> pd.DataFrame:

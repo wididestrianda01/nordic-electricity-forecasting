@@ -300,6 +300,34 @@ def test_run_backtest_rejects_mixed_frequency():
         )
 
 
+def test_run_backtest_isolates_model_failure(monkeypatch, tmp_path):
+    """A failing arm logs NaN rows; the other specs still complete."""
+    history = _hourly_frame_between(date(2024, 1, 1), date(2024, 1, 30))
+    specs = [_spec("lear"), _spec("lgbm")]
+    cutoffs = [date(2024, 1, 28)]
+
+    real_build_model = backtest.build_model
+
+    def failing_build_model(spec):
+        if spec.name == "lgbm":
+            raise RuntimeError("boom")
+        return real_build_model(spec)
+
+    monkeypatch.setattr(backtest, "build_model", failing_build_model)
+
+    result = run_backtest(
+        history,
+        specs,
+        cutoffs,
+        tracking_uri=str(tmp_path / "mlruns"),
+        log=False,
+    )
+
+    assert len(result) == 2  # both specs still represented
+    assert result.loc[result["model"] == "lear", "crps"].notna().all()
+    assert result.loc[result["model"] == "lgbm", "crps"].isna().all()
+
+
 def test_run_backtest_rejects_regime_mismatched_cutoff():
     history = _15min_frame_between(date(2025, 10, 1), date(2025, 11, 1))
     with pytest.raises(ValueError, match="single-frequency frame"):

@@ -262,6 +262,7 @@ _PARETO_COLUMNS = [
     PARAM_MODEL,
     PARAM_FAMILY,
     PARAM_FEATURE_SET,
+    TAG_REGIME,
     "n_folds",
     METRIC_CRPS,
     METRIC_MAE,
@@ -282,7 +283,6 @@ def _build_pareto_table(run_table: pd.DataFrame) -> pd.DataFrame:
     parents = run_table[run_table["parent_run_id"].isna()].set_index("run_id")
     for column in (PARAM_MODEL, PARAM_FAMILY, PARAM_FEATURE_SET):
         children[column] = children["parent_run_id"].map(parents[column])
-
     rows = []
     for _, group in children.groupby("parent_run_id"):
         crps = pd.to_numeric(group[METRIC_CRPS], errors="coerce").mean()
@@ -290,11 +290,15 @@ def _build_pareto_table(run_table: pd.DataFrame) -> pd.DataFrame:
         total_compute = pd.to_numeric(
             group[METRIC_TRAIN_WALL_CLOCK], errors="coerce"
         ).sum() + pd.to_numeric(group[METRIC_INFERENCE_WALL_CLOCK], errors="coerce").sum()
+        regime = (
+            group[TAG_REGIME].iloc[0] if TAG_REGIME in group.columns else None
+        )
         rows.append(
             {
                 PARAM_MODEL: group[PARAM_MODEL].iloc[0],
                 PARAM_FAMILY: group[PARAM_FAMILY].iloc[0],
                 PARAM_FEATURE_SET: group[PARAM_FEATURE_SET].iloc[0],
+                TAG_REGIME: regime,
                 "n_folds": len(group),
                 METRIC_CRPS: crps,
                 METRIC_MAE: mae,
@@ -303,9 +307,14 @@ def _build_pareto_table(run_table: pd.DataFrame) -> pd.DataFrame:
         )
 
     pareto = pd.DataFrame(rows)
-    pareto["pareto_optimal"] = _pareto_optimal_mask(
-        pareto[METRIC_CRPS], pareto["total_compute_s"]
-    )
+    # The non-dominated front is computed within each regime, not pooled: a
+    # model cheap and accurate in one regime must not dominate a model in the
+    # other regime. NaN metrics never flag as optimal.
+    pareto["pareto_optimal"] = False
+    for _, group in pareto.groupby(TAG_REGIME, dropna=False):
+        pareto.loc[group.index, "pareto_optimal"] = _pareto_optimal_mask(
+            group[METRIC_CRPS], group["total_compute_s"]
+        )
     return pareto[_PARETO_COLUMNS]
 
 

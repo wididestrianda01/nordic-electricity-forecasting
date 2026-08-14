@@ -119,6 +119,37 @@ def test_build_pareto_table_aggregates_parent_children():
     assert bool(row["pareto_optimal"])
 
 
+def _parent_child(parent: str, model: str, crps: float, compute: float,
+                   regime: str) -> list[dict]:
+    """One parent run + one fold child; compute is split train/infer evenly."""
+    child = f"{parent}-c"
+    return [
+        {"run_id": parent, "parent_run_id": None, "model": model, "family": "gbdt",
+         "feature_set": "full-features", "regime": None, "CRPS": None, "MAE": None,
+         "train_wall_clock_s": None, "inference_wall_clock_s": None},
+        {"run_id": child, "parent_run_id": parent, "model": None, "family": None,
+         "feature_set": None, "regime": regime, "CRPS": crps, "MAE": crps,
+         "train_wall_clock_s": compute / 2, "inference_wall_clock_s": compute / 2},
+    ]
+
+
+def test_build_pareto_table_flags_within_regime():
+    # Regime 60min: A (1.0, 100) vs B (2.0, 1) are incomparable -> both optimal.
+    # Regime 15min: C (1.0, 100) vs D (0.5, 50) -> D dominates C -> only D optimal.
+    rows = []
+    rows += _parent_child("pA", "a", 1.0, 100.0, "60min")
+    rows += _parent_child("pB", "b", 2.0, 1.0, "60min")
+    rows += _parent_child("pC", "c", 1.0, 100.0, "15min")
+    rows += _parent_child("pD", "d", 0.5, 50.0, "15min")
+    pareto = _build_pareto_table(pd.DataFrame(rows))
+    by_model = pareto.set_index("model")
+
+    assert bool(by_model.loc["a", "pareto_optimal"]) is True
+    assert bool(by_model.loc["b", "pareto_optimal"]) is True
+    assert bool(by_model.loc["c", "pareto_optimal"]) is False
+    assert bool(by_model.loc["d", "pareto_optimal"]) is True
+
+
 def test_export_run_table_integration(tmp_path):
     tracking_uri = str(tmp_path / "mlruns")
     _log_two_models(tracking_uri)

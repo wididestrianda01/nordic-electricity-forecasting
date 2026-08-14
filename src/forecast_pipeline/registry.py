@@ -203,6 +203,11 @@ def build_model(spec: ModelSpec) -> Any:
     imported lazily (inside this function) so ``registry`` imports before
     their home modules exist. ``spec.feature_set`` must match the arm's
     class-level ``feature_set``, otherwise ``ValueError``.
+
+    ``spec.hyperparams`` are passed as constructor keyword arguments so a
+    tuned spec (ticket 22) overrides the arm's pinned defaults. Arms that do
+    not accept tuning receive an empty dict (the default for every roster
+    spec), so this is a no-op for the committed comparison.
     """
     entry = _ARM_REGISTRY.get(spec.name)
     if entry is None:
@@ -217,4 +222,4 @@ def build_model(spec: ModelSpec) -> Any:
         arm_class = globals()[class_name]
     else:
         arm_class = getattr(importlib.import_module(module), class_name)
-    return arm_class()
+    return arm_class(**spec.hyperparams)

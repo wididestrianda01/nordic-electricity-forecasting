@@ -117,16 +117,32 @@ class XgboostArm(_GbtQuantileArm):
 class CatboostArm(_GbtQuantileArm):
     """CatBoost quantile arm: three ``CatBoostRegressor`` (Quantile loss)."""
 
+    def __init__(
+        self,
+        iterations: int | None = None,
+        depth: int | None = None,
+        learning_rate: float | None = None,
+        l2_leaf_reg: float | None = None,
+    ) -> None:
+        super().__init__()
+        self._iterations = iterations
+        self._depth = depth
+        self._learning_rate = learning_rate
+        self._l2_leaf_reg = l2_leaf_reg
+
     def _make_model(self, alpha: float) -> CatBoostRegressor:
-        return CatBoostRegressor(
-            loss_function=f"Quantile:alpha={alpha}",
-            iterations=50,
-            depth=4,
-            learning_rate=0.1,
-            random_seed=self.SEED,
-            thread_count=1,
-            verbose=False,
-        )
+        params: dict[str, Any] = {
+            "loss_function": f"Quantile:alpha={alpha}",
+            "iterations": self._iterations if self._iterations is not None else 50,
+            "depth": self._depth if self._depth is not None else 4,
+            "learning_rate": self._learning_rate if self._learning_rate is not None else 0.1,
+            "random_seed": self.SEED,
+            "thread_count": 1,
+            "verbose": False,
+        }
+        if self._l2_leaf_reg is not None:
+            params["l2_leaf_reg"] = self._l2_leaf_reg
+        return CatBoostRegressor(**params)
 
     def _fit_model(
         self, model: CatBoostRegressor, X: pd.DataFrame, target: pd.Series

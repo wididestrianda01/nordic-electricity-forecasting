@@ -62,10 +62,15 @@ class ChronosArm:
     NUM_SAMPLES = NUM_SAMPLES
     EXCLUDED_COVARIATES = EXCLUDED_COVARIATES
 
-    def __init__(self) -> None:
+    def __init__(self, input_chunk_length: int | None = None) -> None:
         self._model: Chronos2Model | None = None
         self._target: pd.Series | None = None
         self._past_covariates: pd.DataFrame | None = None
+        self._input_chunk_length = (
+            input_chunk_length
+            if input_chunk_length is not None
+            else self.INPUT_CHUNK_LENGTH
+        )
 
     @staticmethod
     def _covariates(features: pd.DataFrame) -> pd.DataFrame:
@@ -79,7 +84,7 @@ class ChronosArm:
     def _ensure_model(self) -> Chronos2Model:
         if self._model is None:
             self._model = Chronos2Model(
-                input_chunk_length=self.INPUT_CHUNK_LENGTH,
+                input_chunk_length=self._input_chunk_length,
                 output_chunk_length=self.OUTPUT_CHUNK_LENGTH,
                 likelihood=QuantileRegression(quantiles=list(self.QUANTILES)),
                 pl_trainer_kwargs={"accelerator": "cpu"},

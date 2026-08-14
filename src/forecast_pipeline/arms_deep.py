@@ -70,15 +70,21 @@ class NbeatsArm:
     EPOCHS = 2
     BATCH_SIZE = 8
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        num_stacks: int | None = None,
+        num_blocks: int | None = None,
+        layer_widths: int | None = None,
+        n_epochs: int | None = None,
+    ) -> None:
         self._model = NBEATSModel(
             input_chunk_length=self.INPUT_CHUNK_LENGTH,
             output_chunk_length=self.OUTPUT_CHUNK_LENGTH,
-            num_stacks=self.NUM_STACKS,
-            num_blocks=self.NUM_BLOCKS,
+            num_stacks=num_stacks if num_stacks is not None else self.NUM_STACKS,
+            num_blocks=num_blocks if num_blocks is not None else self.NUM_BLOCKS,
             num_layers=self.NUM_LAYERS,
-            layer_widths=self.LAYER_WIDTHS,
-            n_epochs=self.EPOCHS,
+            layer_widths=layer_widths if layer_widths is not None else self.LAYER_WIDTHS,
+            n_epochs=n_epochs if n_epochs is not None else self.EPOCHS,
             batch_size=self.BATCH_SIZE,
             likelihood=GaussianLikelihood(),
             random_state=SEED,

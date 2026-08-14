@@ -128,11 +128,23 @@ class SarimaArm(_PriceOnlyArm):
 
     Hand-specified (not auto-tuned) airline specification: ``order=(0, 1, 1)``
     with a seasonal ``(0, 1, 1, m)`` component, where ``m`` is the one-day
-    seasonal period inferred from the target frequency.
+    seasonal period inferred from the target frequency. ``order``/
+    ``seasonal_order`` overrides (ticket 22) replace the pinned defaults.
     """
 
     ORDER = (0, 1, 1)  # (p, d, q)
     SEASONAL_ORDER = (0, 1, 1)  # (P, D, Q); the period m is inferred.
+
+    def __init__(
+        self,
+        order: tuple[int, int, int] | None = None,
+        seasonal_order: tuple[int, int, int] | None = None,
+    ) -> None:
+        super().__init__()
+        if order is not None:
+            self.ORDER = order
+        if seasonal_order is not None:
+            self.SEASONAL_ORDER = seasonal_order
 
     def _build_model(self, seasonal_period: int) -> _ClassicalModel:
         p, d, q = self.ORDER

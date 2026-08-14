@@ -105,11 +105,15 @@ def tune_sarima(
     historical_data: pd.DataFrame, cutoff: date
 ) -> dict[str, tuple[int, int, int]]:
     """Pick the SARIMA order minimizing AIC over the grid."""
-    train = historical_data.loc[historical_data.index < pd.Timestamp(cutoff)]
+    index = historical_data.index
+    tz = index.tz if isinstance(index, pd.DatetimeIndex) else None
+    cutoff_ts = pd.Timestamp(cutoff)
+    if tz is not None:
+        cutoff_ts = cutoff_ts.tz_localize(tz)
+    train = historical_data.loc[index < cutoff_ts]
     target = train["price"]
     step = target.index[-1] - target.index[-2]
     seasonal_period = _seasonal_period(step)
-
     best_order: tuple[int, int, int] | None = None
     best_seasonal: tuple[int, int, int] | None = None
     best_aic = float("inf")

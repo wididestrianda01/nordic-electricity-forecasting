@@ -25,6 +25,7 @@ from forecast_pipeline.backtest import (
     run_backtest,
 )
 from forecast_pipeline.features import assemble_data
+from forecast_pipeline.pipeline import MTU_15MIN_SWITCH_DATE
 
 #: The frontier (GBDT trio) plus the accuracy anchor (Chronos-2).
 CROSS_ZONE_MODELS = ("catboost", "lgbm", "xgboost", "chronos2")
@@ -104,10 +105,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args(argv)
 
+    end = date.fromisoformat(args.end)
+    # Cross-zone is hourly-only (ticket 23); clamp to the pre-switch boundary so
+    # assemble_data resolves a 60-minute MTU instead of up-sampling to 15-minute.
+    hourly_end = MTU_15MIN_SWITCH_DATE - pd.Timedelta(days=1)
     results = run_cross_zone(
         args.zones,
         date.fromisoformat(args.start),
-        date.fromisoformat(args.end),
+        min(end, hourly_end),
         test_start=date.fromisoformat(args.test_start),
         tracking_uri=args.tracking_uri,
         out_dir=args.out_dir,

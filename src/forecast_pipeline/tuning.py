@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -81,21 +81,30 @@ def _sarima_information_criteria(
     order: tuple[int, int, int],
     seasonal: tuple[int, int, int],
 ) -> tuple[float, float]:
-    """``(aic, bic)`` of a SARIMAX fit with ``simple_differencing`` (ticket 11)."""
-    model = SARIMAX(
-        target.to_numpy(dtype=float),
-        order=order,
-        seasonal_order=(*seasonal, seasonal_period),
-        simple_differencing=True,
-    )
-    result = model.fit(disp=False)
+    """``(aic, bic)`` of a SARIMAX fit with ``simple_differencing`` (ticket 11).
+
+    Returns ``(inf, inf)`` when the order fails to converge or raises, so the
+    grid skips it instead of aborting.
+    """
+    try:
+        model = SARIMAX(
+            target.to_numpy(dtype=float),
+            order=order,
+            seasonal_order=(*seasonal, seasonal_period),
+            simple_differencing=True,
+        )
+        result = model.fit(disp=False)
+    # A grid order can fail for several reasons (singular matrices, LAPACK
+    # errors, non-invertible MA roots); any failure means "skip this order".
+    except Exception:  # noqa: BLE001
+        return float("inf"), float("inf")
     return float(result.aic), float(result.bic)
 
 
 def tune_sarima(
     historical_data: pd.DataFrame, cutoff: date
 ) -> dict[str, tuple[int, int, int]]:
-    """Pick the SARIMA order minimizing AIC over the grid (BIC recorded too)."""
+    """Pick the SARIMA order minimizing AIC over the grid."""
     train = historical_data.loc[historical_data.index < pd.Timestamp(cutoff)]
     target = train["price"]
     step = target.index[-1] - target.index[-2]
@@ -113,7 +122,9 @@ def tune_sarima(
                 best_aic = aic
                 best_order = order
                 best_seasonal = seasonal
-    assert best_order is not None and best_seasonal is not None
+    # Fall back to the pinned airline default if every order failed to fit.
+    if best_order is None or best_seasonal is None:
+        return {"order": (0, 1, 1), "seasonal_order": (0, 1, 1)}
     return {"order": best_order, "seasonal_order": best_seasonal}
 
 
@@ -263,12 +274,14 @@ def run_tuned_comparison(
 ) -> pd.DataFrame:
     """Tune the four models, run default + tuned across folds, write the table.
 
-    The search uses the first fold cutoff as the tuning signal. Both default
-    and tuned specs then run across every fold (``log=False``) for a like-for-
-    like delta, and the tuned specs re-run with ``log=True`` to record the
-    tuned runs in MLflow.
+    The search scores a validation day at the end of the training window (one
+    day before the first fold), so the tuning signal is disjoint from every
+    backtest fold and the final delta is not optimistically biased. Both
+    default and tuned specs then run across every fold (``log=False``) for a
+    like-for-like delta, and the tuned specs re-run with ``log=True`` to record
+    the tuned runs in MLflow.
     """
-    cutoff = cutoffs[0]
+    cutoff = cutoffs[0] - timedelta(days=1)
     searches = {
         "sarima": lambda: tune_sarima(historical_data, cutoff),
         "catboost": lambda: tune_catboost(historical_data, cutoff, n_trials=n_trials),

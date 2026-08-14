@@ -285,8 +285,10 @@ def _build_pareto_table(run_table: pd.DataFrame) -> pd.DataFrame:
         children[column] = children["parent_run_id"].map(parents[column])
     rows = []
     for _, group in children.groupby("parent_run_id"):
-        crps = pd.to_numeric(group[METRIC_CRPS], errors="coerce").mean()
-        mae = pd.to_numeric(group[METRIC_MAE], errors="coerce").mean()
+        # skipna=False so a parent with any failed (NaN) fold gets a NaN mean
+        # and is never flagged optimal on partial data.
+        crps = pd.to_numeric(group[METRIC_CRPS], errors="coerce").mean(skipna=False)
+        mae = pd.to_numeric(group[METRIC_MAE], errors="coerce").mean(skipna=False)
         total_compute = pd.to_numeric(
             group[METRIC_TRAIN_WALL_CLOCK], errors="coerce"
         ).sum() + pd.to_numeric(group[METRIC_INFERENCE_WALL_CLOCK], errors="coerce").sum()

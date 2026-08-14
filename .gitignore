@@ -1,4 +1,6 @@
 .scratch/
+mlruns/
+
 context/
 
 .venv/
@@ -8,3 +10,7 @@ __pycache__/
 .codegraph/
 .claude/
 CLAUDE.md
+.serena/
+.env
+.mypy_cache/
+.ruff_cache/

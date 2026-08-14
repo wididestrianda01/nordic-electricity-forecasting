@@ -9,6 +9,8 @@ dependencies = [
     "scikit-learn>=1.4",
     "lightgbm>=4.3",
     "entsoe-py>=0.8.0",
+    "mlflow>=3.15.1",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]

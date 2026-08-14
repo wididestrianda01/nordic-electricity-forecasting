@@ -5,10 +5,15 @@ structurally distinct regime, rather than assuming one global price-formation
 process across known breaks (Nov 2024 flow-based coupling, Oct 2025 MTU
 switch). Labels are unordered state indices, not tied to specific dates --
 the HMM discovers the breaks from the data itself.
+
+Labels are causal: each row is decoded from the forward-filtered state
+posterior (observations up to and including that row only), never the
+full-sample Viterbi path, so no future price leaks into a historical label.
 """
 
 import numpy as np
 import pandas as pd
+from hmmlearn import _hmmc
 from hmmlearn.hmm import GaussianHMM
 
 # Mirrors forecast_pipeline.pipeline.MIN_HISTORY_DAYS at hourly MTU -- an HMM
@@ -31,7 +36,13 @@ def detect_regimes(historical_data: pd.DataFrame, n_states: int = 2) -> pd.Serie
         raise ValueError(
             f"HMM fit failed (possible convergence or singular covariance): {type(e).__name__}: {e}"
         ) from e
-    states = model.predict(observations)
+    # Causal (forward-filtered) decoding: label each row using only the
+    # observations up to and including that row, never the full-sample path.
+    frameprob = model._compute_likelihood(observations)
+    _, fwdlattice, _ = _hmmc.forward_scaling(
+        model.startprob_, model.transmat_, frameprob
+    )
+    states = fwdlattice.argmax(axis=1)
 
     order = np.argsort(model.means_[:, 0])
     rank_by_state = {state: rank for rank, state in enumerate(order)}

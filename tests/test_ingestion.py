@@ -15,19 +15,22 @@ from forecast_pipeline.pipeline import _mtu_minutes_for, _validate
 
 class _FakeEntsoeClient:
     """Stand-in for entsoe.EntsoePandasClient -- returns recorded-shape fixtures."""
-
     def __init__(self, price: pd.Series, load: pd.DataFrame, wind: pd.DataFrame):
         self._price = price
         self._load = load
         self._wind = wind
+        self.zones: list[str] = []
 
     def query_day_ahead_prices(self, zone, start, end):
+        self.zones.append(zone)
         return self._price
 
     def query_load_forecast(self, zone, start, end):
+        self.zones.append(zone)
         return self._load
 
     def query_wind_and_solar_forecast(self, zone, start, end, **kwargs):
+        self.zones.append(zone)
         return self._wind
 
 
@@ -121,3 +124,37 @@ def test_fetch_market_data_raises_on_missing_wind_column_marker():
 
     with pytest.raises(ValueError, match="No columns containing 'Wind'"):
         fetch_market_data("SE_3", start, end, client=client)
+
+
+@pytest.mark.parametrize(
+    ("domain_zone", "entsoe_code"),
+    [("SE1", "SE_1"), ("SE2", "SE_2"), ("SE3", "SE_3"), ("SE4", "SE_4")],
+)
+def test_fetch_market_data_maps_domain_zone_to_entsoe_code(domain_zone, entsoe_code):
+    start, end = date(2024, 10, 4), date(2024, 10, 20)
+    price, load, wind = _fixture(start, periods=16 * 24, freq="h")
+    client = _FakeEntsoeClient(price, load, wind)
+
+    fetch_market_data(domain_zone, start, end, client=client)
+
+    assert client.zones == [entsoe_code] * 3
+
+
+def test_fetch_market_data_accepts_entsoe_code_directly():
+    start, end = date(2024, 10, 4), date(2024, 10, 20)
+    price, load, wind = _fixture(start, periods=16 * 24, freq="h")
+    client = _FakeEntsoeClient(price, load, wind)
+
+    fetch_market_data("SE_3", start, end, client=client)
+
+    assert client.zones == ["SE_3"] * 3
+
+
+@pytest.mark.parametrize("zone", ["", "SE5", "DE", "SE", "se3"])
+def test_fetch_market_data_raises_on_unknown_zone(zone):
+    start, end = date(2024, 10, 4), date(2024, 10, 20)
+    price, load, wind = _fixture(start, periods=16 * 24, freq="h")
+    client = _FakeEntsoeClient(price, load, wind)
+
+    with pytest.raises(ValueError, match="Unknown ENTSO-E zone"):
+        fetch_market_data(zone, start, end, client=client)

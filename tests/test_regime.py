@@ -1,7 +1,22 @@
 import pandas as pd
 import pytest
+from hmmlearn.hmm import GaussianHMM
 
 from forecast_pipeline.regime import detect_regimes
+
+
+def test_labels_are_causal_not_viterbi(two_regime_scenario, monkeypatch) -> None:
+    """detect_regimes decodes from the forward-filtered posterior (observations
+    up to each row only), never the full-sample Viterbi path (future-looking)."""
+
+    def _no_viterbi(self, X, lengths=None):
+        raise AssertionError("detect_regimes must not call model.predict (Viterbi)")
+
+    monkeypatch.setattr(GaussianHMM, "predict", _no_viterbi)
+    _, history = two_regime_scenario
+    regimes = detect_regimes(history, n_states=2)
+    assert set(regimes.unique()) <= {"regime_0", "regime_1"}
+
 
 
 def test_returns_series_aligned_to_history_index(pre_nov_2024_scenario) -> None:

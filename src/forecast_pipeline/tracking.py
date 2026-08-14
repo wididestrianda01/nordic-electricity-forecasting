@@ -196,6 +196,7 @@ def export_run_table(
     summed compute across folds; ``pareto_optimal`` flags the non-dominated front on
     (minimize CRPS, minimize total compute).
     """
+    os.environ.setdefault(_FILE_STORE_ALLOW_ENV, "true")
     runs = _search_runs(experiment_name)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)

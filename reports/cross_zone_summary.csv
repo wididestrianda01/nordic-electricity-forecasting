@@ -1,0 +1,5 @@
+zone,best_model,best_crps,chronos2_best,chronos2_rank,ranking
+SE1,chronos2,6.232298154535001,True,1,"chronos2, xgboost, lgbm, catboost"
+SE2,chronos2,6.003807270734645,True,1,"chronos2, xgboost, lgbm, catboost"
+SE3,chronos2,6.457967747190305,True,1,"chronos2, lgbm, catboost, xgboost"
+SE4,chronos2,7.141510379735888,True,1,"chronos2, lgbm, catboost, xgboost"

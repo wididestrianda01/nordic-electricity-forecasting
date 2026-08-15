@@ -1,0 +1,5 @@
+model,family,default_crps,tuned_crps,crps_delta,tuned_hyperparams
+sarima,classical,17.027319839108703,17.309439229080485,0.28211938997178265,"{""order"": [2, 1, 1], ""seasonal_order"": [1, 1, 1]}"
+catboost,gbdt,8.524292279148874,9.600046110456836,1.0757538313079618,"{""depth"": 4, ""iterations"": 104, ""l2_leaf_reg"": 8.416401938898996, ""learning_rate"": 0.12703368560684986}"
+nbeats,deep,9.81186052581657,36.21268713037558,26.400826604559008,"{""layer_widths"": 18, ""n_epochs"": 6, ""num_blocks"": 1, ""num_stacks"": 2}"
+chronos2,foundation,6.457967747190305,7.138489417596801,0.6805216704064954,"{""input_chunk_length"": 2048}"

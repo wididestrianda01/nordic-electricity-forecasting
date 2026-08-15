@@ -40,15 +40,21 @@ A secondary comparison tunes the best model per family and reports the delta
 against the pinned default; the default table above stays the headline. SARIMA
 is tuned by an AIC/BIC order grid, CatBoost and N-BEATS by bounded Optuna, and
 Chronos-2 by a context-length sweep (its weights are pretrained and are never
-tuned). The tuned table lives in the snapshot under `tuned_table.csv`.
+tuned). None of the tuned configs beat the pinned default on the hourly
+regime: the deltas are +0.28 (SARIMA), +1.08 (CatBoost), +26.40 (N-BEATS), and
++0.68 (Chronos-2). The N-BEATS search overfit the single validation day, which
+is the clearest case for keeping the bounded default as the headline. The
+tuned table lives in the snapshot under `tuned_table.csv`.
 
 ## Cross-zone robustness
 
 The headline runs on SE3. A reduced run takes the frontier (the three trees)
 plus Chronos-2 across SE1 through SE4 at default configs, hourly regime only,
 to check whether the frontier generalises and whether Chronos-2's accuracy
-edge survives outside SE3. The per-zone ranking is in
-`cross_zone_summary.csv`.
+edge survives outside SE3. Chronos-2 leads every zone (mean CRPS 6.23, 6.00,
+6.46, and 7.14 for SE1 through SE4), and the three trees hold ranks 2 through
+4 in each zone, so both the accuracy anchor and the frontier generalise. The
+per-zone ranking is in `cross_zone_summary.csv`.
 
 ## Feature selection
 
@@ -58,11 +64,13 @@ always-present base. Groups 3 through 7 are cross-border, weather, hydro,
 commodities, and foreign exchange. Group 2 (day-ahead load and wind forecasts)
 is excluded because those values are known only after the price is set.
 
-Forward selection, leave-one-group-out, permutation importance, and SHAP rank
-the groups on LightGBM. The efficient set is the smallest group set within 1%
-of the full-features CRPS, and a transfer check re-runs each full-features arm
-on that set to confirm it earns its cost beyond the model that found it. The
-marginal-value and transfer tables are in the snapshot.
+Forward selection finds cross-border flow to be the dominant exogenous group:
+it is added first and cuts CRPS by 1.68, and dropping it from the full set
+loses 1.16 CRPS. Weather and hydro add less; the carbon price does not help.
+The efficient set (within 1% of the full-features CRPS) is the base group plus
+cross-border. A transfer check re-runs each full-features arm on that set and
+confirms it earns its cost everywhere: the CRPS delta is negative for XGBoost
+(-1.56), TFT (-0.89), CatBoost (-0.65), and Chronos-2 (-0.18).
 
 ## Methodology
 

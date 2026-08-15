@@ -1,3 +1,5 @@
 # Hand-rolled pipeline over entsoe-py/scikit-learn/statsmodels/lightgbm/hmmlearn, not darts/sktime/Nixtla
 
+**Status:** superseded by ADR-0010
+
 The original reference doc assumed `darts` as the forecasting framework — the obvious choice. We're deliberately not using `darts`, `sktime`, or the Nixtla ecosystem. Current EPF literature and practice don't show these frameworks as the dominant tooling; hand-rolling the pipeline over `entsoe-py` (data), `scikit-learn`/`statsmodels` (LEAR), `lightgbm` (quantile regime-conditional model), and `hmmlearn` (regime detection) gives full control over the regime-conditioning logic that a general-purpose forecasting framework would abstract away. Trade-off: more integration code to write ourselves, in exchange for a pipeline whose internals a reviewer can actually read.

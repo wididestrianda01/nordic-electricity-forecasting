@@ -6,10 +6,23 @@ engineers a leakage-free feature matrix, runs an expanding-window backtest
 across the 60-minute and 15-minute market regimes, and reports which models
 sit on the accuracy-per-compute frontier.
 
+## Quick start
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync
+uv run streamlit run app.py
+```
+
+The committed snapshot ships every matrix and result table, so the app and the
+headline ranking run offline with no API key. See [Replication](#replication)
+for the offline rebuild and the full from-scratch run.
+
 ## Result
 
-Mean across the hourly (three folds) and 15-minute (one fold) regimes, lower
-is better on every accuracy column:
+Mean across the hourly (three folds) and 15-minute (one fold) regimes over the
+2021-01-01 to 2026-08-13 window; lower is better on every accuracy column:
 
 | model | family | CRPS | MAE | pinball (P50) | total compute |
 |---|---|---|---|---|---|
@@ -31,8 +44,8 @@ about 0.5%, but a Diebold–Mariano test on the three hourly folds does not find
 that edge significant, and the edge costs roughly three orders of magnitude
 more compute. Four models (SARIMA, TFT, LEAR, ETS) score below a seasonal-naive
 baseline, so they are worse than repeating last week's price. The full metric
-set — CRPS, MAE, the P10/P50/P90 pinball decomposition, the skill score,
-per-regime results, and the pairwise Diebold–Mariano tests — is in `REPORT.md`.
+set (CRPS, MAE, the P10/P50/P90 pinball decomposition, the skill score,
+per-regime results, and the pairwise Diebold–Mariano tests) is in `REPORT.md`.
 
 ## App
 
@@ -57,32 +70,44 @@ Run it with `uv run streamlit run app.py`.
 
 ## Key findings
 
-- **Feature selection** — forward selection finds cross-border flow to be the
+- **Feature selection:** forward selection finds cross-border flow to be the
   dominant exogenous group (it cuts CRPS by 1.68); weather and hydro add less,
-  carbon does not help. The efficient set is the base group plus cross-border,
-  and a transfer check confirms it earns its cost on every full-features arm.
-- **Tuning** — a secondary pass tunes the best model per family. None of the
+  and carbon does not help. The efficient set is the base group plus
+  cross-border, and a transfer check confirms it earns its cost on every
+  full-features arm.
+- **Tuning:** a secondary pass tunes the best model per family. None of the
   tuned configurations beat the pinned default on the hourly regime.
-- **Cross-zone** — the frontier (the three trees) plus Chronos-2 generalise
+- **Cross-zone:** the frontier (the three trees) plus Chronos-2 generalise
   across SE1–SE4; Chronos-2 leads every zone.
 
 ## Methodology
 
-- **Data** — ENTSO-E (cross-border, hydro), Open-Meteo (weather), ECB (EUR/SEK),
-  EEX (EUA carbon), joined at a single `assemble_data` seam with a Parquet
+- **Data:** ENTSO-E (cross-border, hydro), Open-Meteo (weather), ECB (EUR/SEK),
+  and EEX (EUA carbon), joined at a single `assemble_data` seam with a Parquet
   cache so a re-run does not re-fetch.
-- **Features** — seven groups on a no-leakage as-of timing rule, because a
+- **Features:** seven groups on a no-leakage as-of timing rule, because a
   model that sees a value published after its forecast time looks good in a
   backtest and fails in production. Boundary masking zeroes lags and rolling
   windows that cross a regime switch.
-- **Backtest** — expanding walk-forward with yearly refit and a 7-day purge,
+- **Backtest:** expanding walk-forward with yearly refit and a 7-day purge,
   which reproduces how a forecaster is actually used: train on the past,
   forecast the next day, never across a structural break.
-- **Roster** — four families (classical, gradient-boosted, deep, foundation),
-  ten models, every arm pinned to seed 42 so the comparison is reproducible.
+- **Roster:** four families (classical, gradient-boosted, deep, foundation)
+  and ten models, every arm pinned to seed 42 so the comparison is
+  reproducible.
 
 The full methodology, metric definitions with formulas, and the decision
 record are in `REPORT.md` and `docs/adr/`.
+
+## Project structure
+
+- `src/forecast_pipeline/`: data ingestion, feature engineering, models,
+  backtest, and scoring.
+- `notebooks/`: exploratory analysis and the comparison and Pareto narrative.
+- `reports/`: result tables from the full run.
+- `data/snapshot/`: committed matrices and tables for offline reproduction.
+- `docs/adr/`: the architecture decision record.
+- `app.py`: the Streamlit explorer.
 
 ## Replication
 
@@ -109,11 +134,15 @@ set -a && source .env && set +a
 uv run python -m forecast_pipeline.bakeoff --zones SE3 --start 2021-01-01 --end 2026-08-13
 ```
 
+## License
+
+MIT. See `LICENSE`.
+
 ## Full narrative
 
-- `REPORT.md` — the complete benchmark report.
-- `notebooks/01_data_features_regimes.ipynb` — data, features, regime
-  detection, feature selection.
-- `notebooks/02_backtest_comparison_pareto.ipynb` — comparison, tuning,
-  cross-zone, Pareto frontier.
-- `app.py` — the Streamlit explorer.
+- `REPORT.md`: the complete benchmark report.
+- `notebooks/01_data_features_regimes.ipynb`: data, features, regime
+  detection, and feature selection.
+- `notebooks/02_backtest_comparison_pareto.ipynb`: comparison, tuning,
+  cross-zone, and the Pareto frontier.
+- `app.py`: the Streamlit explorer.

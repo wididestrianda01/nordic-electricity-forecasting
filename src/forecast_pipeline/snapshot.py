@@ -27,7 +27,8 @@ from forecast_pipeline.features import assemble_data, build_features
 from forecast_pipeline.pipeline import MTU_15MIN_SWITCH_DATE
 
 #: Snapshot root (committed; distinct from the gitignored ``data/cache/``).
-SNAPSHOT_DIR = "data/snapshot"
+#: Resolved from the module path, not the CWD, so notebooks run from any dir.
+SNAPSHOT_DIR = str(Path(__file__).resolve().parents[2] / "data" / "snapshot")
 MATRICES_SUBDIR = "matrices"
 RESULTS_SUBDIR = "results"
 

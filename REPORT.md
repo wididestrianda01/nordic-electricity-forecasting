@@ -64,6 +64,9 @@ Ten models across four families, all pinned to seed 42:
 | classical | SARIMA, ETS | price-only |
 | gradient-boosted | LightGBM, XGBoost, CatBoost | full-features |
 | deep learning | N-BEATS (price-only), TFT (full-features) | per model |
+| foundation | Chronos-2 (full-features), TimesFM 2.5 (price-only) | per model |
+| linear baseline | LEAR | price-only |
+
 Each model exposes the same `fit`/`predict_quantiles` contract and returns a
 P10/P50/P90 grid per MTU. Foundation models are zero-shot (weights pretrained,
 no training); the deep models run a pinned, two-epoch budget.
@@ -83,30 +86,21 @@ all three a common yardstick: is the model better than a trivial baseline?
 For a delivery-day forecast with realised price `y_t` and quantile forecast
 `Q_q(t)` at level `q`:
 
-**Pinball loss** at level `q`:
+**Pinball loss** at level $q$:
 
-```
-PL_q = (1/n) Σ_t  [ q (y_t − Q_q(t))   if y_t ≥ Q_q(t)
-                  (q−1)(y_t − Q_q(t))  otherwise ]
-```
+$$PL_q = \frac{1}{n} \sum_{t=1}^{n} \begin{cases} q\,(y_t - Q_q(t)) & \text{if } y_t \ge Q_q(t) \\ (q-1)\,(y_t - Q_q(t)) & \text{otherwise} \end{cases}$$
 
 **CRPS** from the three quantiles:
 
-```
-CRPS = (2/3) Σ_{q ∈ {0.10, 0.50, 0.90}} PL_q
-```
+$$\text{CRPS} = \frac{2}{3} \sum_{q \in \{0.10,\,0.50,\,0.90\}} PL_q$$
 
 **MAE** of the median:
 
-```
-MAE = (1/n) Σ_t | y_t − Q_0.50(t) |
-```
+$$\text{MAE} = \frac{1}{n} \sum_{t=1}^{n} \left| y_t - Q_{0.50}(t) \right|$$
 
 **Skill score**:
 
-```
-skill = 1 − CRPS / CRPS_seasonal_naive
-```
+$$\text{skill} = 1 - \frac{\text{CRPS}}{\text{CRPS}_\text{seasonal-naive}}$$
 
 All metrics are computed per timestamp, then averaged within a fold and
 across folds.

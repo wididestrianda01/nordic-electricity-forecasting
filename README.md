@@ -23,6 +23,7 @@ is better on every accuracy column:
 | tft | deep | 20.12 | 30.20 | 15.10 | 640.6 s |
 | lear | ml | 26.29 | 26.29 | 13.15 | 2.5 s |
 | ets | classical | 33.40 | 52.81 | 26.41 | 147.8 s |
+
 The gradient-boosted trees (CatBoost, LightGBM, XGBoost) dominate the
 accuracy-per-compute frontier: they reach CRPS within 0.1–1.0 of Chronos-2 at
 roughly a thousandth of the compute. Chronos-2 edges the trees on mean CRPS by

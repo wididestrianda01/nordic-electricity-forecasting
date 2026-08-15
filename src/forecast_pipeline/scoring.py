@@ -15,6 +15,8 @@ the weighted mean quantile level is 0.5.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -178,3 +180,34 @@ def score_by_season(scores: pd.Series) -> pd.Series:
     """Mean `scores` grouped by meteorological season derived from the index."""
     labels = [_SEASON_BY_MONTH[ts.month] for ts in scores.index]
     return scores.groupby(labels).mean().rename_axis("season")
+
+def diebold_mariano(
+    loss_a: pd.Series, loss_b: pd.Series, *, horizon: int = 24
+) -> tuple[float, float]:
+    """Diebold-Mariano test of equal predictive accuracy (two-sided).
+
+    ``loss_a`` and ``loss_b`` are aligned per-observation loss series with a
+    shared index. Returns ``(statistic, p_value)``; a negative statistic means
+    ``loss_a`` has lower loss (is more accurate). The long-run variance of the
+    loss differential uses the MA(``horizon``-1) estimator appropriate for
+    ``horizon``-step-ahead forecasts, so pass the forecast horizon (24 hourly /
+    96 15-minute) to account for within-day autocorrelation.
+    """
+    if len(loss_a) != len(loss_b):
+        raise ValueError("loss series must be equal length")
+    d = loss_a.to_numpy(dtype=float) - loss_b.to_numpy(dtype=float)
+    n = len(d)
+    if n < 2:
+        raise ValueError("diebold_mariano needs at least 2 observations")
+
+    dbar = d.mean()
+    # Long-run variance under MA(horizon-1) serial correlation.
+    max_lag = min(horizon - 1, n - 1)
+    lrv = np.sum((d - dbar) ** 2) / n
+    for j in range(1, max_lag + 1):
+        lrv += 2.0 * np.sum((d[: n - j] - dbar) * (d[j:] - dbar)) / n
+    lrv = max(lrv, 1e-12)
+
+    statistic = dbar / math.sqrt(lrv / n)
+    p_value = math.erfc(abs(statistic) / math.sqrt(2.0))
+    return float(statistic), float(p_value)

@@ -8,88 +8,80 @@ sit on the accuracy-per-compute frontier.
 
 ## Result
 
-Mean CRPS across the hourly (2023-01-01 to 2025-09-30, three folds) and
-15-minute (2025-10-01 onward, one fold) regimes, lower is better:
+Mean across the hourly (three folds) and 15-minute (one fold) regimes, lower
+is better on every accuracy column:
 
-| model | family | mean CRPS | total compute |
-|---|---|---|---|
-| chronos2 | foundation | 9.61 | 3061.6 s |
-| catboost | gbdt | 9.64 | 1.8 s |
-| lgbm | gbdt | 9.72 | 0.5 s |
-| xgboost | gbdt | 10.63 | 1.8 s |
-| nbeats | deep | 14.39 | 38.6 s |
-| timesfm | foundation | 14.72 | 17.5 s |
-| sarima | classical | 14.99 | 166.6 s |
-| tft | deep | 20.12 | 640.6 s |
-| lear | ml | 26.29 | 2.5 s |
-| ets | classical | 33.40 | 147.8 s |
-
+| model | family | CRPS | MAE | pinball (P50) | total compute |
+|---|---|---|---|---|---|
+| chronos2 | foundation | 9.61 | 15.45 | 7.73 | 3061.6 s |
+| catboost | gbdt | 9.64 | 15.50 | 7.75 | 1.8 s |
+| lgbm | gbdt | 9.72 | 15.37 | 7.68 | 0.5 s |
+| xgboost | gbdt | 10.63 | 15.70 | 7.85 | 1.8 s |
+| nbeats | deep | 14.39 | 18.40 | 9.20 | 38.6 s |
+| timesfm | foundation | 14.72 | 21.33 | 10.66 | 17.5 s |
+| sarima | classical | 14.99 | 21.69 | 10.85 | 166.6 s |
+| tft | deep | 20.12 | 30.20 | 15.10 | 640.6 s |
+| lear | ml | 26.29 | 26.29 | 13.15 | 2.5 s |
+| ets | classical | 33.40 | 52.81 | 26.41 | 147.8 s |
 The gradient-boosted trees (CatBoost, LightGBM, XGBoost) dominate the
-accuracy-per-compute frontier. Chronos-2 edges the trees on mean CRPS by about
-0.5% but costs roughly three orders of magnitude more compute (3061.6 s versus
-0.5 to 1.8 s). The deep models (N-BEATS, TFT) and the classical models
-(SARIMA, ETS) are dominated on both axes. LEAR, the regularized linear
-baseline, is fast but the least accurate of the price-driven models.
+accuracy-per-compute frontier: they reach CRPS within 0.1–1.0 of Chronos-2 at
+roughly a thousandth of the compute. Chronos-2 edges the trees on mean CRPS by
+about 0.5%, but a Diebold–Mariano test on the three hourly folds does not find
+that edge significant, and the edge costs roughly three orders of magnitude
+more compute. Four models (SARIMA, TFT, LEAR, ETS) score below a seasonal-naive
+baseline, so they are worse than repeating last week's price. The full metric
+set — CRPS, MAE, the P10/P50/P90 pinball decomposition, the skill score,
+per-regime results, and the pairwise Diebold–Mariano tests — is in `REPORT.md`.
 
-The frontier flag is computed within each regime, not pooled, so a model that
-is cheap and accurate in one regime does not dominate a model in the other.
+## App
 
-## Tuning
+`app.py` is a single-page Streamlit explorer of the snapshot. It renders the
+headline ranking, the Pareto scatter, a per-model drill-down, and the feature
+selection results.
 
-A secondary comparison tunes the best model per family and reports the delta
-against the pinned default; the default table above stays the headline. SARIMA
-is tuned by an AIC/BIC order grid, CatBoost and N-BEATS by bounded Optuna, and
-Chronos-2 by a context-length sweep (its weights are pretrained and are never
-tuned). None of the tuned configs beat the pinned default on the hourly
-regime: the deltas are +0.28 (SARIMA), +1.08 (CatBoost), +26.40 (N-BEATS), and
-+0.68 (Chronos-2). The N-BEATS search overfit the single validation day, which
-is the clearest case for keeping the bounded default as the headline. The
-tuned table lives in the snapshot under `tuned_table.csv`.
+<table>
+<tr>
+  <td><img src="docs/img/app_overview_pareto.png" width="300" alt="Overview and Pareto frontier"/></td>
+  <td><img src="docs/img/app_table_drilldown.png" width="300" alt="Ranked table and model drill-down"/></td>
+  <td><img src="docs/img/app_features.png" width="300" alt="Feature exploration"/></td>
+</tr>
+<tr>
+  <td align="center">Overview and Pareto frontier</td>
+  <td align="center">Ranked table and drill-down</td>
+  <td align="center">Feature exploration</td>
+</tr>
+</table>
 
-## Cross-zone robustness
+Run it with `uv run streamlit run app.py`.
 
-The headline runs on SE3. A reduced run takes the frontier (the three trees)
-plus Chronos-2 across SE1 through SE4 at default configs, hourly regime only,
-to check whether the frontier generalises and whether Chronos-2's accuracy
-edge survives outside SE3. Chronos-2 leads every zone (mean CRPS 6.23, 6.00,
-6.46, and 7.14 for SE1 through SE4), and the three trees hold ranks 2 through
-4 in each zone, so both the accuracy anchor and the frontier generalise. The
-per-zone ranking is in `cross_zone_summary.csv`.
+## Key findings
 
-## Feature selection
-
-Seven feature groups feed the full-features models. Group 1 (autoregressive
-lags, rolling statistics, calendar features, regime label) is the
-always-present base. Groups 3 through 7 are cross-border, weather, hydro,
-commodities, and foreign exchange. Group 2 (day-ahead load and wind forecasts)
-is excluded because those values are known only after the price is set.
-
-Forward selection finds cross-border flow to be the dominant exogenous group:
-it is added first and cuts CRPS by 1.68, and dropping it from the full set
-loses 1.16 CRPS. Weather and hydro add less; the carbon price does not help.
-The efficient set (within 1% of the full-features CRPS) is the base group plus
-cross-border. A transfer check re-runs each full-features arm on that set and
-confirms it earns its cost everywhere: the CRPS delta is negative for XGBoost
-(-1.56), TFT (-0.89), CatBoost (-0.65), and Chronos-2 (-0.18).
+- **Feature selection** — forward selection finds cross-border flow to be the
+  dominant exogenous group (it cuts CRPS by 1.68); weather and hydro add less,
+  carbon does not help. The efficient set is the base group plus cross-border,
+  and a transfer check confirms it earns its cost on every full-features arm.
+- **Tuning** — a secondary pass tunes the best model per family. None of the
+  tuned configurations beat the pinned default on the hourly regime.
+- **Cross-zone** — the frontier (the three trees) plus Chronos-2 generalise
+  across SE1–SE4; Chronos-2 leads every zone.
 
 ## Methodology
 
-- **Data**: ENTSO-E (cross-border, hydro), Open-Meteo (weather), ECB (EUR/SEK),
-  EEX (EUA carbon). Joined at a single `assemble_data` seam backed by a
-  Parquet cache keyed on `(source, start, end, params)`.
-- **Features**: every covariate follows an as-of timing rule, so no feature
-  leaks future information. Boundary masking zeroes lags and rolling windows
-  that cross a regime switch; calendar features are cyclical.
-- **Regimes**: the market moved from 60-minute to 15-minute settlement on
-  2025-10-01, with an earlier boundary detected on 2024-11-04. Each regime is
-  assembled and backtested as its own single-frequency window.
-- **Backtest**: expanding walk-forward, yearly refit, 7-day purge. Primary
-  metric is mean CRPS from the P10/P50/P90 quantiles, with pinball loss and
-  MAE reported alongside and a seasonal-naive skill score.
-- **Roster**: four families (classical, gradient-boosted, deep, foundation),
-  ten models, every arm pinned to seed 42.
+- **Data** — ENTSO-E (cross-border, hydro), Open-Meteo (weather), ECB (EUR/SEK),
+  EEX (EUA carbon), joined at a single `assemble_data` seam with a Parquet
+  cache so a re-run does not re-fetch.
+- **Features** — seven groups on a no-leakage as-of timing rule, because a
+  model that sees a value published after its forecast time looks good in a
+  backtest and fails in production. Boundary masking zeroes lags and rolling
+  windows that cross a regime switch.
+- **Backtest** — expanding walk-forward with yearly refit and a 7-day purge,
+  which reproduces how a forecaster is actually used: train on the past,
+  forecast the next day, never across a structural break.
+- **Roster** — four families (classical, gradient-boosted, deep, foundation),
+  ten models, every arm pinned to seed 42 so the comparison is reproducible.
 
-See the ADRs in `docs/adr/` for the full decision record.
+The full methodology, metric definitions with formulas, and the decision
+record are in `REPORT.md` and `docs/adr/`.
 
 ## Replication
 
@@ -118,8 +110,9 @@ uv run python -m forecast_pipeline.bakeoff --zones SE3 --start 2021-01-01 --end 
 
 ## Full narrative
 
-- `notebooks/01_data_features_regimes.ipynb`: data pipeline, features, regime
+- `REPORT.md` — the complete benchmark report.
+- `notebooks/01_data_features_regimes.ipynb` — data, features, regime
   detection, feature selection.
-- `notebooks/02_backtest_comparison_pareto.ipynb`: model comparison, tuning,
+- `notebooks/02_backtest_comparison_pareto.ipynb` — comparison, tuning,
   cross-zone, Pareto frontier.
-- `app.py`: a single-page Streamlit explorer (`uv run streamlit run app.py`).
+- `app.py` — the Streamlit explorer.

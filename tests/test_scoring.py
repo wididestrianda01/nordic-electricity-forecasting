@@ -7,6 +7,7 @@ import pytest
 from forecast_pipeline.scoring import (
     crps,
     crps_scores,
+    diebold_mariano,
     mae,
     mean_score,
     pinball_loss,
@@ -151,3 +152,28 @@ def test_misaligned_actuals_raise():
 def test_skill_score_zero_baseline_raises():
     with pytest.raises(ValueError):
         skill_score(1.0, 0.0)
+
+
+def test_diebold_mariano_identical_series():
+    loss = pd.Series(np.linspace(1.0, 10.0, 200))
+    stat, p = diebold_mariano(loss, loss.copy())
+    assert abs(stat) < 1e-9
+    assert p == pytest.approx(1.0)
+
+
+def test_diebold_mariano_detects_worse_model():
+    rng = np.random.default_rng(0)
+    noise_a = rng.normal(0, 0.1, 500)
+    noise_b = rng.normal(0, 0.1, 500)
+    base = rng.normal(0, 1, 500)
+    # model A has systematically higher loss than B
+    loss_a = pd.Series(base + 0.5 + noise_a)
+    loss_b = pd.Series(base + noise_b)
+    stat, p = diebold_mariano(loss_a, loss_b)
+    assert stat > 0
+    assert p < 0.05
+
+
+def test_diebold_mariano_rejects_mismatched_length():
+    with pytest.raises(ValueError):
+        diebold_mariano(pd.Series([1.0, 2.0]), pd.Series([1.0]))

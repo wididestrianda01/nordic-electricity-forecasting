@@ -16,3 +16,7 @@ CLAUDE.md
 .mypy_cache/
 .ruff_cache/
 .coverage
+
+# Licensed source data: matrices embed ENTSO-E, Open-Meteo, EEX and ECB values.
+# EEX EUA values are Internal Usage only under EEX GC v8. Regenerate from data/raw.
+data/snapshot/matrices/
